@@ -1,0 +1,172 @@
+/*
+ * 外壳的两种形态：
+ *   竖屏 —— 顶栏 + 内容，整体是一条可以一直往下滚的文档流；
+ *   横屏 —— 顶栏变成左侧栏，内容区横向分栏，各栏自己滚动。
+ * 用 flex 而不是 grid，因为竖屏时希望内容把页面撑长（交给 body 滚动），
+ * 横屏时希望外壳锁在视口高度内（交给每一栏滚动）。
+ */
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 100dvh;
+  background: var(--surface);
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding-block: var(--gap-sm);
+  padding-inline: var(--gap-md);
+  border-block-end: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  min-inline-size: 0;
+}
+
+.mark {
+  flex: none;
+  inline-size: 1.6rem;
+  block-size: 1.6rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(140deg, var(--accent), color-mix(in oklab, var(--accent) 35%, var(--surface)));
+}
+
+.brandText {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+
+.brandName {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.brandMeta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow-block: hidden;
+  overflow-inline: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2xs);
+  margin-inline-start: auto;
+}
+
+.navItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding-block: 0.3rem;
+  padding-inline: 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.navItem:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.navActive {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.navLabel {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.navHint {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2xs);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.notice {
+  flex: none;
+  padding-block: var(--gap-sm);
+  padding-inline: var(--gap-md);
+}
+
+.viewport {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+@media (orientation: landscape) and (min-width: 46rem) {
+  .shell {
+    flex-direction: row;
+    block-size: 100dvh;
+    overflow: hidden;
+  }
+
+  /* 顶栏竖过来当侧栏：导航变成一列，状态贴底。 */
+  .bar {
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    inline-size: var(--rail-inline);
+    overflow-block: auto;
+    padding-block: var(--gap-md);
+    border-block-end: 0;
+    border-inline-end: 1px solid var(--line);
+  }
+
+  .nav {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    margin-inline-start: 0;
+  }
+
+  .navItem {
+    inline-size: 100%;
+  }
+
+  .status {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-block-start: auto;
+  }
+
+  .main {
+    overflow-block: hidden;
+  }
+}

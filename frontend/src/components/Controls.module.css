@@ -1,0 +1,211 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-2xs);
+  padding-block: 0.45rem;
+  padding-inline: 0.8rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.danger {
+  border-color: color-mix(in oklab, var(--danger) 45%, var(--line-strong));
+  color: var(--danger);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.compact {
+  padding-block: 0.2rem;
+  padding-inline: 0.5rem;
+  font-size: var(--text-xs);
+}
+
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+/* ---------------------------------------------------------------- 输入控件 */
+
+.input,
+.textarea,
+.select {
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding-block: 0.5rem;
+  padding-inline: 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.input:hover:not(:disabled),
+.textarea:hover:not(:disabled),
+.select:hover:not(:disabled) {
+  border-color: var(--text-faint);
+}
+
+.input:focus-visible,
+.textarea:focus-visible,
+.select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input:disabled,
+.textarea:disabled,
+.select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-faint);
+}
+
+.textarea {
+  /* resize 也支持逻辑值，竖屏时拖动的是块轴方向。 */
+  resize: block;
+  min-block-size: 6rem;
+  font-family: var(--font-mono);
+  line-height: 1.55;
+}
+
+.select {
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- 表单行 */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-inline-size: 0;
+}
+
+.fieldLabel {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.fieldHint {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------------- 开关 */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  cursor: pointer;
+}
+
+.switchDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 原生 checkbox 只负责状态与键盘交互，视觉完全由 track 承担。 */
+.switchInput {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switchTrack {
+  position: relative;
+  flex: none;
+  inline-size: 2.25rem;
+  block-size: 1.25rem;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.switchTrack::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 0.15rem;
+  inset-inline-start: 0.15rem;
+  inline-size: 0.95rem;
+  block-size: 0.95rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  transition: inset-inline-start var(--dur-fast) var(--ease);
+}
+
+.switchInput:checked + .switchTrack {
+  background: var(--accent);
+}
+
+.switchInput:checked + .switchTrack::after {
+  inset-inline-start: 1.15rem;
+}
+
+.switchInput:focus-visible + .switchTrack {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.switchLabel {
+  font-size: var(--text-sm);
+}

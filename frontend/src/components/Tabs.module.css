@@ -1,0 +1,52 @@
+/* 分类切换条：窄屏时可以横向滚动，不挤压主内容。 */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2xs);
+  padding: var(--gap-2xs);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+@media (max-width: 34rem) {
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-inline: auto;
+    overscroll-behavior-inline: contain;
+  }
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-2xs);
+  padding-block: 0.3rem;
+  padding-inline: 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.tab:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+
+.count {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}

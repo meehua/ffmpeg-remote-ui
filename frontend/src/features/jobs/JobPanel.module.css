@@ -1,0 +1,93 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding-block: var(--gap-sm);
+  padding-inline: var(--gap-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-xs);
+}
+
+.paths {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2xs);
+  min-inline-size: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.path {
+  overflow-block: hidden;
+  overflow-inline: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-inline-size: 22ch;
+}
+
+.arrow {
+  color: var(--text-faint);
+}
+
+.progressRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.progressRow > :first-child {
+  flex: 1 1 8rem;
+}
+
+.metric {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.meta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.command {
+  padding-block: var(--gap-2xs);
+  padding-inline: var(--gap-xs);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.log {
+  margin: 0;
+  max-block-size: 16rem;
+  overflow-block: auto;
+  padding-block: var(--gap-xs);
+  padding-inline: var(--gap-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}

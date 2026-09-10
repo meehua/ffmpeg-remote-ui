@@ -1,0 +1,215 @@
+.count {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-block-size: 62vh;
+  overflow-block: auto;
+  overscroll-behavior-block: contain;
+  border-block-start: 1px solid var(--line);
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--gap-xs);
+  inline-size: 100%;
+  padding-block: var(--gap-2xs);
+  padding-inline: var(--gap-2xs);
+  border: 0;
+  border-block-end: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.entry:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.entry:disabled {
+  cursor: default;
+}
+
+.entryActive {
+  background: var(--accent-soft);
+}
+
+.entryName {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-block: hidden;
+  overflow-inline: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flags {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.entryDesc {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow-block: hidden;
+  overflow-inline: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 窄屏时把 flags 挤到下一行，名称优先。 */
+@media (max-width: 30rem) {
+  .entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------- 详情 */
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.helpHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-xs);
+}
+
+.helpTitle {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.helpSummary {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.helpSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2xs);
+}
+
+.helpSectionTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-xs);
+  padding-block-end: var(--gap-2xs);
+  border-block-end: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.helpSectionCount {
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2xs);
+}
+
+.optionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-block: var(--gap-2xs);
+  padding-inline-start: var(--gap-xs);
+  border-inline-start: 2px solid var(--line);
+}
+
+.optionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-xs);
+}
+
+.optionName {
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.optionType {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.optionDesc {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.optionFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.optionValues {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.raw {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.rawSummary {
+  padding-block: var(--gap-2xs);
+  padding-inline: var(--gap-xs);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.pre {
+  margin: 0;
+  max-block-size: 24rem;
+  overflow-block: auto;
+  padding-block: var(--gap-xs);
+  padding-inline: var(--gap-xs);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

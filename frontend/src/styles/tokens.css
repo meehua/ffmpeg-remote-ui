@@ -1,0 +1,83 @@
+/*
+ * 设计令牌。
+ *
+ * 颜色用 oklch：感知均匀，调明暗不会串色，深浅两套值可以只改亮度。
+ * 两套值交给 light-dark()，浏览器按 color-scheme 自动选择，
+ * 因此不需要两份样式表，也不需要给 <html> 挂主题类名。
+ *
+ * 尺寸全部用 rem，间距是 --step 的整数倍，整体改密度只需动一个变量。
+ */
+:root {
+  color-scheme: light dark;
+
+  /* ---- 表面 ---- */
+  --surface: light-dark(oklch(0.99 0.003 264), oklch(0.16 0.012 264));
+  --surface-raised: light-dark(oklch(1 0 0), oklch(0.2 0.014 264));
+  --surface-sunken: light-dark(oklch(0.965 0.004 264), oklch(0.125 0.012 264));
+  --surface-hover: light-dark(oklch(0.955 0.004 264), oklch(0.23 0.014 264));
+  --surface-active: light-dark(oklch(0.93 0.006 264), oklch(0.27 0.016 264));
+
+  /* ---- 描边 ---- */
+  --line: light-dark(oklch(0.9 0.006 264), oklch(0.29 0.014 264));
+  --line-strong: light-dark(oklch(0.81 0.008 264), oklch(0.39 0.016 264));
+
+  /* ---- 文本 ---- */
+  --text: light-dark(oklch(0.22 0.01 264), oklch(0.93 0.006 264));
+  --text-muted: light-dark(oklch(0.48 0.012 264), oklch(0.71 0.012 264));
+  --text-faint: light-dark(oklch(0.63 0.01 264), oklch(0.56 0.012 264));
+
+  /* ---- 语义色 ---- */
+  --accent: light-dark(oklch(0.52 0.13 165), oklch(0.78 0.13 165));
+  --accent-soft: light-dark(oklch(0.95 0.03 165), oklch(0.26 0.04 165));
+  --accent-ink: light-dark(oklch(0.99 0 0), oklch(0.17 0.02 165));
+  --ok: light-dark(oklch(0.55 0.14 152), oklch(0.78 0.13 152));
+  --warn: light-dark(oklch(0.6 0.14 75), oklch(0.82 0.13 80));
+  --danger: light-dark(oklch(0.55 0.19 27), oklch(0.72 0.16 25));
+  --danger-soft: light-dark(oklch(0.96 0.02 27), oklch(0.25 0.05 25));
+
+  /* ---- 排版 ---- */
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", "Noto Sans Mono CJK SC", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --leading: 1.6;
+  --leading-tight: 1.3;
+
+  /* ---- 间距 ---- */
+  --step: 0.25rem;
+  --gap-2xs: calc(var(--step) * 1);
+  --gap-xs: calc(var(--step) * 2);
+  --gap-sm: calc(var(--step) * 3);
+  --gap-md: calc(var(--step) * 4);
+  --gap-lg: calc(var(--step) * 6);
+  --gap-xl: calc(var(--step) * 10);
+
+  /* ---- 形状 ---- */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 1rem;
+  --radius-pill: 999px;
+
+  /* ---- 动效 ---- */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+
+  /* ---- 布局 ----
+   * --pane-min 是分栏里一栏的最小宽度：窄于它，栏会换到下一行，
+   *  因此同一个 DOM 在平板竖屏/横屏之间都能自然过渡。
+   * --shell-min 是「值得分栏」的阈值。
+   */
+  --pane-min: 19rem;
+  --shell-min: 46rem;
+  --bar-block: 3.25rem;
+  --rail-inline: 12.5rem;
+  --shadow-soft: 0 1px 2px light-dark(oklch(0 0 0 / 0.06), oklch(0 0 0 / 0.4));
+}

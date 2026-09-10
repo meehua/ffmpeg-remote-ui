@@ -1,0 +1,180 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-2xs);
+  padding-block: 0.1rem;
+  padding-inline: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-active);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ok {
+  background: color-mix(in oklab, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.warn {
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+
+.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.neutral {
+  background: var(--surface-active);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------- 进度 */
+
+.progress {
+  position: relative;
+  inline-size: 100%;
+  block-size: 0.3rem;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-active);
+}
+
+.progressFill {
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: inline-size var(--dur) var(--ease);
+}
+
+.progressIndeterminate .progressFill {
+  inline-size: 35% !important;
+  animation: slide 1.2s var(--ease) infinite;
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+/* ---------------------------------------------------------------- 加载 */
+
+.spinnerWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.spinner {
+  inline-size: 0.9rem;
+  block-size: 0.9rem;
+  border: 2px solid var(--line-strong);
+  border-block-start-color: var(--accent);
+  border-radius: var(--radius-pill);
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinnerLabel {
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- 空状态 */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  align-items: start;
+  padding-block: var(--gap-lg);
+  padding-inline: var(--gap-sm);
+}
+
+.emptyTitle {
+  color: var(--text-muted);
+}
+
+.emptyHint {
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------- 错误 */
+
+.error {
+  margin: 0;
+  padding-block: var(--gap-xs);
+  padding-inline: var(--gap-sm);
+  border-inline-start: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- 键值表 */
+
+.dataList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-block-start: 1px solid var(--line);
+}
+
+.dataRow {
+  display: grid;
+  grid-template-columns: minmax(7rem, 30%) minmax(0, 1fr);
+  gap: var(--gap-sm);
+  padding-block: var(--gap-xs);
+  border-block-end: 1px solid var(--line);
+}
+
+.dataListDense .dataRow {
+  padding-block: var(--gap-2xs);
+}
+
+.dataLabel {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.dataValue {
+  margin: 0;
+  min-inline-size: 0;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* 窄屏时标签与值纵向排列，避免值被压成一列窄条。 */
+@media (max-width: 26rem) {
+  .dataRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--gap-2xs);
+  }
+}

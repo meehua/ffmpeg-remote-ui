@@ -1,0 +1,80 @@
+.browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-inline-size: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+.location {
+  padding-block: var(--gap-2xs);
+  padding-inline: var(--gap-xs);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.entries {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* 列表自己滚，标题与工具条留在原处。 */
+  max-block-size: 24rem;
+  overflow-block: auto;
+  overscroll-behavior-block: contain;
+  border-block-start: 1px solid var(--line);
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--gap-xs);
+  inline-size: 100%;
+  padding-block: 0.3rem;
+  padding-inline: var(--gap-2xs);
+  border: 0;
+  border-block-end: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: pointer;
+}
+
+.entry:hover {
+  background: var(--surface-hover);
+}
+
+.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.icon {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.name {
+  overflow-block: hidden;
+  overflow-inline: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
