@@ -152,6 +152,11 @@
 /* ---------------------------------------------------------------- 开关 */
 
 .switch {
+  /* 必须是定位祖先：下面的原生 checkbox 用绝对定位隐藏，
+     否则它的包含块会一路退到视口，跟着内容流跑到几百像素之外——
+     既不参与祖先的 overflow 裁剪，又会把整个文档的 scrollHeight 顶上去
+     （表现为页面能滚、滚到底却是一片空白、顶部还被顶出视口）。 */
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--gap-xs);
@@ -166,6 +171,9 @@
 /* 原生 checkbox 只负责状态与键盘交互，视觉完全由 track 承担。 */
 .switchInput {
   position: absolute;
+  /* 钉在定位祖先的原点，确保这个 1×1 的元素永远不会跑到别处去撑高文档。 */
+  inset-block-start: 0;
+  inset-inline-start: 0;
   inline-size: 1px;
   block-size: 1px;
   opacity: 0;

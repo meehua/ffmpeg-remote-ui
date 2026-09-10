@@ -10,13 +10,27 @@
   box-sizing: border-box;
 }
 
+/*
+ * 应用外壳：文档流自己不滚动，高度锁在视口内；
+ * 滚动只发生在显式声明的内容区（见 components/Pane.module.css）。
+ *
+ * 为什么必须锁死：只要内容能把 body 撑长，「外层滚动 + 内层滚动」就会同时存在，
+ * 滚轮归谁取决于鼠标停在哪个容器上，还会出现滚到底露出空白、顶部被顶出视口的错位。
+ * 高度链是 html → body → #root → .shell → .main → .viewport → .panes，
+ * 每一环都有确定的块级尺寸，不依赖内容自然高度。
+ */
+html,
+body,
+#root {
+  block-size: 100%;
+  overflow: hidden;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
-  height: 100%;
 }
 
 body {
-  min-block-size: 100%;
   margin: 0;
   background: var(--surface);
   color: var(--text);
@@ -79,6 +93,11 @@ pre {
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
+  /*
+   * 滚到边界时不把滚轮/手势传染给外层容器。
+   * 这是嵌套滚动区彼此独立的关键：内层滚到底就停住，不会顺手把外层带走。
+   */
+  overscroll-behavior: contain;
 }
 
 *::-webkit-scrollbar {

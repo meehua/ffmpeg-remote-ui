@@ -1,8 +1,13 @@
 /*
  * 分栏的两个形态都由 CSS 决定：
- *   窄屏 / 竖屏 —— 卡片纵向堆叠（合并成一条文档流，整体滚动）；
- *   横屏且够宽 —— 并列分栏，每栏内部纵向滚动，互不牵连。
- * 切换全部靠逻辑属性与方向媒体查询，DOM 不变。
+ *   窄屏 / 竖屏 —— 卡片纵向堆叠，这一层（.panes）是滚动容器；
+ *   横屏且够宽 —— 并列分栏，每一栏（.pane）各自纵向滚动，互不牵连。
+ *
+ * 滚动模型只有两层，且任何时刻只有其中一层真的在滚：
+ *   竖屏：.panes 滚，.pane 不滚（卡片跟随文档流一起走）；
+ *   横屏：.pane 滚，.panes 不滚（每栏独立）。
+ * 再往里不再设置滚动容器——同一屏出现好几个滚动条时，
+ * 滚轮归谁取决于鼠标停在哪里，那是混乱的来源。
  */
 .panes {
   display: grid;
@@ -10,7 +15,10 @@
   align-content: start;
   gap: var(--gap-md);
   padding: var(--gap-md);
+  flex: 1 1 auto;
   min-block-size: 0;
+  overflow-block: auto;
+  overscroll-behavior-block: contain;
 }
 
 .pane {
@@ -18,6 +26,9 @@
   flex-direction: column;
   gap: var(--gap-sm);
   min-inline-size: 0;
+  /* flex/grid 子项默认的 min-block-size: auto 会让它撑到内容高度，
+     于是“锁高 + 内部滚动”失效，内容反而顶破容器。显式归零。 */
+  min-block-size: 0;
   padding: var(--gap-md);
   background: var(--surface-raised);
   border: 1px solid var(--line);
@@ -61,6 +72,7 @@
   flex-direction: column;
   gap: var(--gap-sm);
   min-inline-size: 0;
+  min-block-size: 0;
 }
 
 @media (orientation: landscape) and (min-width: 46rem) {
@@ -75,7 +87,7 @@
     align-content: stretch;
     gap: 0;
     padding: 0;
-    block-size: 100%;
+    /* 横屏时滚动权下移到每一栏，这一层只负责摆列。 */
     overflow-block: hidden;
   }
 
@@ -95,7 +107,8 @@
     border-inline-end: 0;
   }
 
-  /* 标题吸附在栏顶，滚动长列表时仍知道自己在哪一栏。 */
+  /* 标题吸附在栏顶，滚动长列表时仍知道自己在哪一栏。
+     用与栏内容相同的背景色盖住下方内容，滚上去的部分不会透出来。 */
   .head {
     position: sticky;
     inset-block-start: calc(var(--gap-md) * -1);

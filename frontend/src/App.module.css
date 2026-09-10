@@ -1,14 +1,16 @@
 /*
  * 外壳的两种形态：
- *   竖屏 —— 顶栏 + 内容，整体是一条可以一直往下滚的文档流；
- *   横屏 —— 顶栏变成左侧栏，内容区横向分栏，各栏自己滚动。
- * 用 flex 而不是 grid，因为竖屏时希望内容把页面撑长（交给 body 滚动），
- * 横屏时希望外壳锁在视口高度内（交给每一栏滚动）。
+ *   竖屏 —— 顶栏在上，内容区（.panes）是唯一的滚动容器；
+ *   横屏 —— 顶栏竖过来当左侧栏，内容区横向分栏，每一栏自己滚动。
+ * 两种形态下外壳都锁在视口高度内：滚动只发生在内容区，页面本身不滚
+ * （外壳规则见 styles/base.css）。
  */
 .shell {
   display: flex;
   flex-direction: column;
-  min-block-size: 100dvh;
+  block-size: 100%;
+  min-block-size: 0;
+  overflow: hidden;
   background: var(--surface);
 }
 
@@ -109,12 +111,15 @@
   gap: var(--gap-2xs);
 }
 
+/* main 与 viewport 都不滚动，只负责把高度和滚动权传递到 .panes；
+   overflow: hidden 保证任何意外超高的子项都不会顶破它们。 */
 .main {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-inline-size: 0;
   min-block-size: 0;
+  overflow-block: hidden;
 }
 
 .notice {
@@ -129,13 +134,12 @@
   flex: 1 1 auto;
   min-inline-size: 0;
   min-block-size: 0;
+  overflow-block: hidden;
 }
 
 @media (orientation: landscape) and (min-width: 46rem) {
   .shell {
     flex-direction: row;
-    block-size: 100dvh;
-    overflow: hidden;
   }
 
   /* 顶栏竖过来当侧栏：导航变成一列，状态贴底。 */
@@ -164,9 +168,5 @@
     flex-direction: column;
     align-items: flex-start;
     margin-block-start: auto;
-  }
-
-  .main {
-    overflow-block: hidden;
   }
 }
