@@ -218,6 +218,10 @@ export interface GpuDevice {
   driver?: string;
   vendor?: string;
   deviceId?: string;
+  /** 来自系统 PCI ID 数据库的厂商名，仅用于显示；查不到时为空。 */
+  vendorName?: string;
+  /** 来自系统 PCI ID 数据库的型号名，仅用于显示；查不到时为空。 */
+  deviceName?: string;
   pciAddress?: string;
   properties?: Record<string, string>;
 }

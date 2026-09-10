@@ -75,10 +75,19 @@ export function CommandBuilder({ snapshot, devices, settings, onChange }: Comman
           >
             <option value="">自动选择</option>
             {renderNodes.map((device) => (
-              <option key={device.id} value={device.renderNode}>
-                {device.renderNode}
-                {device.pciAddress ? ` · ${device.pciAddress}` : ''}
-                {device.driver ? ` · ${device.driver}` : ''}
+              <option
+                key={device.id}
+                value={device.renderNode}
+                title={[device.deviceName, device.pciAddress, device.driver].filter(Boolean).join(' · ')}
+              >
+                {/* 有型号就优先显示型号（认卡直观），没有则回退到 vendor:device ID；
+                    节点始终跟在后面，因为同型号的两块卡得靠它区分。 */}
+                {[
+                  device.deviceName || `${device.vendor ?? ''}:${device.deviceId ?? ''}`,
+                  device.renderNode,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </option>
             ))}
           </Select>

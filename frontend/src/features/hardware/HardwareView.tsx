@@ -30,17 +30,22 @@ export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
             {devices.map((device) => (
               <li className={styles.device} key={device.id}>
                 <header className={styles.deviceHead}>
-                  <span className={styles.deviceId}>{device.pciAddress || device.id}</span>
+                  {/* 有型号就用型号当标题，认卡比看 PCI 地址直观得多。 */}
+                  <span className={styles.deviceId}>
+                    {device.deviceName || device.pciAddress || device.id}
+                  </span>
                   {device.driver ? <Badge tone="accent">{device.driver}</Badge> : null}
                 </header>
 
                 <DataList
                   dense
                   items={[
+                    { label: '型号', value: device.deviceName || '—' },
+                    { label: '厂商', value: device.vendorName || '—' },
                     { label: 'render node', value: device.renderNode ?? '—' },
                     { label: 'card node', value: device.cardNode ?? '—' },
-                    { label: 'vendor', value: device.vendor ?? '—' },
-                    { label: 'device', value: device.deviceId ?? '—' },
+                    { label: 'PCI', value: device.pciAddress ?? '—' },
+                    { label: 'vendor / device id', value: `${device.vendor ?? '—'} / ${device.deviceId ?? '—'}` },
                     { label: 'sysfs', value: device.sysfsPath ?? '—' },
                   ]}
                 />
