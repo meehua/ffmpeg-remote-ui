@@ -108,7 +108,12 @@ export function WorkspaceView({ snapshot, hardware, jobs, logs }: WorkspaceViewP
         description="选项、取值与默认值全部来自服务器当前 FFmpeg 的 -h 输出。"
       >
         {snapshot ? (
-          <CommandBuilder snapshot={snapshot} settings={settings} onChange={setSettings} />
+          <CommandBuilder
+            snapshot={snapshot}
+            devices={hardware?.devices ?? []}
+            settings={settings}
+            onChange={setSettings}
+          />
         ) : (
           <Spinner label="正在读取 FFmpeg 能力" />
         )}

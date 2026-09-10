@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { api } from '../../api/client';
-import type { FFOption, Snapshot } from '../../api/types';
+import type { FFOption, GpuDevice, Snapshot } from '../../api/types';
 import { Field, Select, TextInput } from '../../components/Controls';
 import { ErrorNote, Spinner } from '../../components/Display';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
@@ -11,6 +11,8 @@ import styles from './CommandBuilder.module.css';
 
 interface CommandBuilderProps {
   snapshot: Snapshot;
+  /** 服务器上真实存在的 DRM 设备，用作硬件设备节点候选。 */
+  devices: GpuDevice[];
   settings: EncodeSettings;
   onChange: (next: EncodeSettings) => void;
 }
@@ -21,8 +23,12 @@ interface CommandBuilderProps {
  * 编码器候选来自 `ffmpeg -encoders`，每个编码器的可调参数来自
  * `ffmpeg -h encoder=<名>`：取值、默认值、范围都照抄 FFmpeg 的输出，
  * 因此 FFmpeg 升级后这里自动跟着变，程序里没有任何内置参数表。
+ *
+ * 硬件设备同理：类型来自 `ffmpeg -init_hw_device list`，节点来自 /dev/dri。
+ * 多 GPU 的机器上 FFmpeg 自己挑设备可能挑错（表现为「打开编码器失败」），
+ * 所以这里把选择权交给用户，而不是替它猜。
  */
-export function CommandBuilder({ snapshot, settings, onChange }: CommandBuilderProps) {
+export function CommandBuilder({ snapshot, devices, settings, onChange }: CommandBuilderProps) {
   const videoEncoders = useMemo(
     () => snapshot.encoders.filter((item) => item.flags?.startsWith('V')),
     [snapshot.encoders],
@@ -31,9 +37,54 @@ export function CommandBuilder({ snapshot, settings, onChange }: CommandBuilderP
     () => snapshot.encoders.filter((item) => item.flags?.startsWith('A')),
     [snapshot.encoders],
   );
+  const renderNodes = useMemo(() => devices.filter((item) => item.renderNode), [devices]);
+
+  const setHwDevice = (patch: Partial<EncodeSettings['hwDevice']>) =>
+    onChange({ ...settings, hwDevice: { ...settings.hwDevice, ...patch } });
 
   return (
     <div className={styles.builder}>
+      <Field
+        label="硬件设备"
+        hint="设备类型与节点都取自服务器；多 GPU 时显式指定可避免 FFmpeg 挑错设备。"
+      >
+        <Select
+          value={settings.hwDevice.type}
+          onChange={(event) => setHwDevice({ type: event.target.value })}
+        >
+          <option value="">不初始化（交给 FFmpeg 默认）</option>
+          {snapshot.hwDeviceTypes.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {snapshot.hwDeviceTypes.length === 0 ? (
+        <p className={styles.sectionMeta}>
+          这套 FFmpeg 没有报告任何硬件设备类型（`-init_hw_device list` 为空）。
+        </p>
+      ) : null}
+
+      {settings.hwDevice.type !== '' ? (
+        <Field label="设备节点" hint="留空表示让 FFmpeg 在选中的类型里自己挑。">
+          <Select
+            value={settings.hwDevice.device}
+            onChange={(event) => setHwDevice({ device: event.target.value })}
+          >
+            <option value="">自动选择</option>
+            {renderNodes.map((device) => (
+              <option key={device.id} value={device.renderNode}>
+                {device.renderNode}
+                {device.pciAddress ? ` · ${device.pciAddress}` : ''}
+                {device.driver ? ` · ${device.driver}` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : null}
+
       <Field label="视频编码器" hint="保留原视频流时不重新编码，速度最快。">
         <Select
           value={settings.videoCodec}

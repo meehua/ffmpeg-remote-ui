@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { api } from '../../api/client';
-import type { Job, LogLine, Snapshot } from '../../api/types';
+import type { GpuDevice, Job, LogLine, Snapshot } from '../../api/types';
 import { Button, ButtonRow, Field, Switch, TextArea, TextInput } from '../../components/Controls';
 import { EmptyState, ErrorNote } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
@@ -14,6 +14,8 @@ import styles from './BatchView.module.css';
 
 interface BatchViewProps {
   snapshot: Snapshot | null;
+  /** 服务器上真实存在的 DRM 设备，供「硬件设备」选择使用。 */
+  devices: GpuDevice[];
   jobs: Job[];
   logs: Record<string, LogLine[]>;
 }
@@ -33,7 +35,7 @@ function outputPathFor(input: string, dir: string, suffix: string, ext: string):
 }
 
 /** 批处理：一组输入文件套用同一套参数。 */
-export function BatchView({ snapshot, jobs, logs }: BatchViewProps) {
+export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
   const [inputs, setInputs] = useState('');
   const [outDir, setOutDir] = useState('');
   const [suffix, setSuffix] = useState('');
@@ -129,7 +131,12 @@ export function BatchView({ snapshot, jobs, logs }: BatchViewProps) {
         description="参数与工作区一致：全部来自服务器 FFmpeg 的能力。"
       >
         {snapshot ? (
-          <CommandBuilder snapshot={snapshot} settings={settings} onChange={setSettings} />
+          <CommandBuilder
+            snapshot={snapshot}
+            devices={devices}
+            settings={settings}
+            onChange={setSettings}
+          />
         ) : (
           <EmptyState title="正在读取 FFmpeg 能力" hint="读取完成后才能选择编码器。" />
         )}

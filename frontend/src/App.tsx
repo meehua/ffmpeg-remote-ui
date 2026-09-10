@@ -88,7 +88,14 @@ export function App() {
             <WorkspaceView snapshot={snapshot.data} hardware={hardware.data} jobs={jobs} logs={logs} />
           ) : null}
 
-          {section === 'batch' ? <BatchView snapshot={snapshot.data} jobs={jobs} logs={logs} /> : null}
+          {section === 'batch' ? (
+            <BatchView
+              snapshot={snapshot.data}
+              devices={hardware.data?.devices ?? []}
+              jobs={jobs}
+              logs={logs}
+            />
+          ) : null}
 
           {section === 'catalog' ? (
             <CatalogView

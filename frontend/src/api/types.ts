@@ -26,6 +26,8 @@ export interface Snapshot {
   version: string;
   buildConfig: string;
   hwaccels: string[];
+  /** `ffmpeg -init_hw_device list`：这套 FFmpeg 支持的硬件设备类型。 */
+  hwDeviceTypes: string[];
   encoders: FFItem[];
   decoders: FFItem[];
   filters: FFItem[];

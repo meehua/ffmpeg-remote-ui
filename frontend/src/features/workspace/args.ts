@@ -11,6 +11,21 @@ export interface EncodeSettings {
   /** 选项名 -> 值；空字符串表示「保持 ffmpeg 默认」。 */
   videoOptions: Record<string, string>;
   audioOptions: Record<string, string>;
+  /** 硬件设备初始化；type 为空表示不初始化，交给 FFmpeg 默认行为。 */
+  hwDevice: HwDeviceSetting;
+}
+
+/**
+ * 一次硬件设备初始化，对应 `-init_hw_device <type>=hw[:<device>]`。
+ *
+ * type 来自 `ffmpeg -init_hw_device list`，device 来自服务器上真实存在的
+ * render node——两者都是服务器报告的事实，这里不做任何型号推断。
+ */
+export interface HwDeviceSetting {
+  /** 设备类型，例如 qsv、vaapi、cuda。 */
+  type: string;
+  /** 设备节点，例如 /dev/dri/renderD129；留空表示交给 FFmpeg 自己挑。 */
+  device: string;
 }
 
 export const emptySettings: EncodeSettings = {
@@ -18,6 +33,7 @@ export const emptySettings: EncodeSettings = {
   audioCodec: '',
   videoOptions: {},
   audioOptions: {},
+  hwDevice: { type: '', device: '' },
 };
 
 export interface BuildRequest {
@@ -47,6 +63,18 @@ export function buildArgs({ input, output, settings, extraArgs, overwrite }: Bui
   if (overwrite) {
     args.push('-y');
   }
+
+  // 硬件设备必须放在任何输入之前：它是全局选项，负责建立一个具名设备，
+  // 后面的 -c:v 才可能引用它（-hwaccel 这类输入选项同理）。放到 -i 之后就晚了。
+  //
+  // 例外：-qsv_device 这类「设备路径」选项本身就是全局选项，位置不敏感，
+  // 放在附加参数里同样能生效；但显式初始化设备仍然更可靠，尤其是多 GPU 时。
+  const hw = settings.hwDevice;
+  if (hw.type !== '') {
+    const device = hw.device.trim();
+    args.push('-init_hw_device', device === '' ? `${hw.type}=hw` : `${hw.type}=hw:${device}`);
+  }
+
   args.push('-i', input);
 
   if (settings.videoCodec !== '') {
