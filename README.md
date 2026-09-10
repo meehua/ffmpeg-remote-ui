@@ -116,6 +116,57 @@ FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
   ./ffmpeg-remote-ui
 ```
 
+## 硬件加速
+
+硬件编码**先要解决设备权限**，这是最容易卡住的一步：`/dev/dri/renderD*` 的
+属主是 `root:render`、权限 `rw-rw----`，运行程序的账户不在 `render` 组里时，
+FFmpeg 根本打不开设备，但报出来的是含糊的
+`Device creation failed: -542398533`（`AVERROR_EXTERNAL`），很容易被误判成
+驱动或 QSV 运行时缺库。
+
+先看清设备与自己的组：
+
+```bash
+ls -l /dev/dri/            # renderD128/renderD129 的属主与权限
+ls -l /dev/dri/by-path/    # PCI 地址 → 节点，用来对应到具体哪块卡
+id                         # 当前账户是否在 render / video 组里
+```
+
+`by-path` 那步尤其有用：核显通常在 `0000:00:02.0`，独显在插槽地址上，一眼就能
+看出哪个节点是哪块 GPU——程序里「硬件设备」选择器展示的就是这个对应关系。
+
+修复方式（改完要**重新登录**，或重启以后台方式运行的服务）：
+
+```bash
+sudo usermod -aG render,video <运行程序的账户>
+```
+
+临时验证也可以用 `sudo chmod 666 /dev/dri/renderD*`，但重启后就失效了。
+
+接着确认驱动侧就绪——`vainfo` 能列出 profile，说明硬件与驱动都没问题：
+
+```bash
+sudo vainfo --display drm --device /dev/dri/renderD128
+```
+
+在容器里运行时，除了账户要在组里，设备本身也要传进去：
+
+```bash
+docker run --device /dev/dri:/dev/dri --group-add render --group-add video …
+```
+
+权限通了之后，在「编码参数」面板选硬件设备类型（`qsv`、`vaapi`…）与节点，即可
+生成 `-init_hw_device <type>=hw:<node>`。建议先用最小命令确认编码器真的可用，
+再去跑长任务：
+
+```bash
+ffmpeg -hide_banner -init_hw_device qsv=hw:/dev/dri/renderD129 \
+  -f lavfi -i nullsrc -frames:v 1 -c:v hevc_qsv -f null -
+```
+
+多 GPU 时记得挑对卡：核显与独显支持的档次常常不同（例如 UHD 630 的 HEVC 编码
+只到 8-bit，DG1 支持 10-bit）。
+
 ## 开发
 
 ```bash
