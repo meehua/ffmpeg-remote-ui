@@ -1,88 +1,110 @@
 # FFmpeg Remote UI
 
-一个面向 Linux 服务器 / NAS 的 Web FFmpeg 控制台。
+**English** | [简体中文](README.zh-CN.md)
 
-名字里的 remote 是字面意思：浏览器只是一块远程界面，媒体文件、`ffprobe`、`ffmpeg`、
-GPU 与任务队列全部位于运行程序的服务器上；浏览器既不转码，也不要求上传服务器
-已有的媒体。
+A web FFmpeg console for Linux servers and NAS boxes.
 
-## 设计要点
+"remote" is meant literally: the browser is only the remote control. Media files,
+`ffprobe`, `ffmpeg`, the GPU and the job queue all live on the machine running the
+program. The browser never transcodes, and it never asks you to upload media that
+is already on the server.
 
-完整原则见 [PHILOSOPHY.md](PHILOSOPHY.md)，落到代码里是这几条：
+## Design notes
 
-- **FFmpeg 是能力的唯一事实来源。** 编码器、解码器、滤镜、封装/解封装格式、
-  码流滤镜、协议、设备、像素与采样格式、声道布局、颜色、流处置、硬件加速方法，
-  以及每个组件的可调参数、取值、默认值与取值范围，全部来自运行时查询
-  （`ffmpeg -encoders`、`ffmpeg -h encoder=…` …）。代码里没有任何内置能力表，
-  所以服务器上的 FFmpeg 升级后，界面自动跟着变。
-- **零第三方 Go 依赖。** 路由用标准库 `net/http`（Go 1.22+ 的方法与通配模式），
-  实时推送用 `text/event-stream`（SSE），队列与取消用 `context`。没有 Web 框架、
-  没有 ORM、没有 WebSocket 库。
-- **单一二进制。** 前端构建产物通过 `go:embed` 嵌进可执行文件，运行时只需要
-  程序本身加上服务器上的 FFmpeg/FFprobe。
-- **默认不需要配置。** 默认监听 `127.0.0.1:0`（系统分配端口），FFmpeg/FFprobe
-  从 `PATH` 自动发现；只有要覆盖时才用环境变量。
+The full rationale lives in [PHILOSOPHY.md](PHILOSOPHY.md) (in Chinese). In code it
+comes down to these:
 
-## 架构
+- **FFmpeg is the single source of truth for capabilities.** Encoders, decoders,
+  filters, muxers and demuxers, bitstream filters, protocols, devices, pixel and
+  sample formats, channel layouts, colors, dispositions, hardware acceleration
+  methods — and every component's tunable options with their values, defaults and
+  ranges — all come from runtime queries (`ffmpeg -encoders`,
+  `ffmpeg -h encoder=…`, …). There is no built-in capability table anywhere, so
+  upgrading FFmpeg on the server automatically changes the UI.
+- **Zero third-party Go dependencies.** Routing uses the standard library
+  `net/http` (Go 1.22+ method and wildcard patterns), live updates use
+  `text/event-stream` (SSE), and the queue and cancellation use `context`. No web
+  framework, no ORM, no WebSocket library.
+- **Single binary.** The frontend build output is embedded with `go:embed`, so at
+  runtime you need nothing but the program itself plus FFmpeg/FFprobe on the
+  server.
+- **No configuration by default.** It listens on `127.0.0.1:0` (a system-assigned
+  port) and discovers FFmpeg/FFprobe from `PATH`; environment variables only matter
+  when you want to override something.
+
+## Layout
 
 ```
-cmd/ffmpeg-remote-ui  入口：环境变量、优雅关闭、嵌入式前端
-internal/ffmpeg     FFmpeg/FFprobe 查询与解析（能力快照、-h 结构、ffprobe）
-internal/queue      并发受限的任务队列（状态机、进度、日志、事件广播）
-internal/server     HTTP 层（路由、SSE 事件流、文件浏览、静态资源）
-internal/hardware   Linux DRM render node 发现（只读 sysfs，不推断能力）
-frontend            React 前端（无 UI 组件库、无 CSS 框架）
+cmd/ffmpeg-remote-ui  entry point: env vars, graceful shutdown, embedded frontend
+internal/ffmpeg     FFmpeg/FFprobe queries and parsing (capability snapshot, -h, ffprobe)
+internal/queue      concurrency-limited job queue (state machine, progress, logs, events)
+internal/server     HTTP layer (routing, SSE event stream, file browsing, static assets)
+internal/hardware   Linux DRM render node discovery (read-only sysfs, no capability inference)
+frontend            React frontend (no UI component library, no CSS framework)
 ```
 
-### 后端
+### Backend
 
-- 能力快照的十几种查询并发执行，启动耗时取决于最慢的一条，而不是它们的总和。
-- 任务队列有并发上限（`FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS`，默认 1）、排队位置、
-  取消 / 重试 / 删除 / 清理，以及每个任务 400 行的滚动日志。
-- 进度来自 `ffmpeg -progress pipe:1`：`out_time_us`、`frame`、`fps`、`speed`、
-  `bitrate`、`total_size`。ffmpeg 自己报不出时长时（例如 `-re` 限速）界面显示
-  「进行中」，不会假装停在 0%。
-- `/api/events` 是一条 SSE 流：连接时先补一份全量任务快照，之后推送增量的
-  `job` 与 `log` 事件；断线由浏览器自动重连，重连后状态仍然收敛。
-- 路径校验会清理路径并解析符号链接（包括对尚不存在路径的最近存在祖先），
-  避免通过链接跳出媒体根目录。
+- The dozen or so capability queries run concurrently, so startup time is bounded by
+  the slowest one rather than by their sum.
+- The job queue enforces a concurrency limit (`FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS`,
+  default 1), tracks queue position, and supports cancel / retry / delete / clear,
+  plus a rolling 400-line log per job.
+- Progress comes from `ffmpeg -progress pipe:1`: `out_time_us`, `frame`, `fps`,
+  `speed`, `bitrate`, `total_size`. When ffmpeg cannot report a duration (with `-re`,
+  for instance) the UI shows "in progress" instead of pretending to sit at 0%.
+- `/api/events` is a single SSE stream: it sends a full job snapshot on connect and
+  then incremental `job` and `log` events. The browser reconnects automatically, and
+  state converges again after a reconnect.
+- Path validation cleans paths and resolves symlinks (including the nearest existing
+  ancestor of a path that does not exist yet), so links cannot escape the media
+  roots.
 
-### 前端
+### Frontend
 
-- React 19 + TypeScript + Vite，**不使用任何 UI 组件库或 CSS 框架**，样式由
-  CSS Modules 手写。
-- 颜色用 `oklch` 并以 `light-dark()` 给出深浅两套值，浏览器按 `color-scheme`
-  自动选择——不需要主题类名，也不需要两份样式表。
-- 布局意图一律用**逻辑属性**表达：`inline-size` / `block-size`、
-  `padding-inline`、`border-inline-end`、`overflow-block`、`inset-block-start` 等。
-- **滚动只有两层，且任何时刻只有一层真的在滚**：`html` / `body` 锁在视口内，
-  页面本身永不滚动；竖屏时内容区（分栏容器）是唯一的滚动容器，横屏时改为每一栏
-  各自滚动。滚轮不会因为鼠标停在哪个子区域而改变归属，也不会出现滚到底露出空白、
-  顶部被顶出视口的错位。
-- **分栏是自适应的**：竖屏（或窗口过窄）时各区域是卡片，纵向堆叠；横屏且够宽时
-  变成并列分栏、标题吸顶。两种形态是同一份 DOM，只由方向媒体查询切换。
-- 参数构建器与手写 argv 双模式：前者从服务器真实能力生成表单，后者直接写
-  命令行；`shellQuote` 与 `SplitArgs` 在前端和后端是同一套规则，因此预览到的
-  命令与实际执行的一致。
-- **硬件设备可显式指定**：设备类型取自 `ffmpeg -init_hw_device list`，设备节点取自
-  `/dev/dri`；机器上有多块 GPU（例如核显 + 独显）时 FFmpeg 会自己挑一个，
-  挑错就表现为「打开编码器失败」。选中后生成 `-init_hw_device <type>=hw:<node>`，
-  并放在 `-i` 之前——设备初始化是全局选项，放在输入之后就失去语义了。
+- React 19 + TypeScript + Vite, with **no UI component library and no CSS
+  framework** — styles are hand-written CSS Modules.
+- Colors use `oklch` with `light-dark()` pairs, so the browser picks light or dark
+  from `color-scheme` — no theme class names and no duplicate stylesheets.
+- All layout intent is expressed with **logical properties**: `inline-size` /
+  `block-size`, `padding-inline`, `border-inline-end`, `overflow-block`,
+  `inset-block-start`, and so on.
+- **There are exactly two scroll layers, and only one of them ever scrolls.**
+  `html` / `body` are locked to the viewport and the page itself never scrolls; in
+  portrait the content area (the pane container) is the only scroller, while in
+  landscape each pane scrolls on its own. The wheel never changes owner depending on
+  where the pointer happens to be, and you never scroll to the bottom only to find
+  blank space with the top pushed out of view.
+- **The columns are adaptive**: in portrait (or when the window is too narrow) each
+  area is a card stacked vertically; in landscape and wide enough they become
+  side-by-side columns with sticky headers. Both forms are the same DOM, switched
+  purely by orientation media queries.
+- Two modes for building the command line: a form generated from the server's real
+  capabilities, and hand-written argv. `shellQuote` / `SplitArgs` follow the same
+  rules on both frontend and backend, so the command you preview is the one that
+  runs.
+- **Hardware devices can be chosen explicitly**: the device type comes from
+  `ffmpeg -init_hw_device list` and the device node from `/dev/dri`. On machines
+  with more than one GPU (integrated plus discrete, say) FFmpeg picks one on its
+  own, and picking wrong shows up as "failed to open encoder". Selecting one emits
+  `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device initialization
+  is a global option and loses its meaning after the input.
 
-## 构建
+## Build
 
-需要 Go 1.26.x 与 Node.js：
+Requires Go 1.26.x and Node.js:
 
 ```bash
 ./build.sh
 ```
 
-脚本会构建前端、把 `frontend/dist` 复制到 `cmd/ffmpeg-remote-ui/web`、跑 `go vet`
-与 `go test`，最后产出 `./ffmpeg-remote-ui`。
+The script builds the frontend, copies `frontend/dist` into
+`cmd/ffmpeg-remote-ui/web`, runs `go vet` and `go test`, and finally produces
+`./ffmpeg-remote-ui`.
 
-前端依赖（均为当前稳定版）：
+Frontend dependencies (all current stable):
 
-| 包 | 版本 |
+| Package | Version |
 | --- | --- |
 | react / react-dom | 19.3.0 |
 | vite | 8.3.0 |
@@ -90,24 +112,26 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
 | typescript | 7.0.2 |
 | @types/node | 26.5.1 |
 
-## 运行
+## Run
 
 ```bash
 ./ffmpeg-remote-ui
 ```
 
-终端会打印实际监听地址与生效的媒体目录。环境变量都有合理默认值，并统一带
-`FFMPEG_REMOTE_UI_` 前缀，避免和同机其它服务（尤其是 `HTTP_ADDR` 这类泛名）撞车：
+The terminal prints the actual listening address and the effective media roots.
+Every environment variable has a sensible default, and they all share the
+`FFMPEG_REMOTE_UI_` prefix to avoid colliding with other services on the same host
+(especially generic names such as `HTTP_ADDR`):
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `FFMPEG_REMOTE_UI_HTTP_ADDR` | `127.0.0.1:0` | 监听地址；`:0` 表示由系统分配端口 |
-| `FFMPEG_REMOTE_UI_MEDIA_ROOTS` | 空 | 允许访问的媒体根目录，用 `:` 分隔；留空表示不限制 |
-| `FFMPEG_REMOTE_UI_FFMPEG_PATH` | `ffmpeg` | 从 `PATH` 查找 |
-| `FFMPEG_REMOTE_UI_FFPROBE_PATH` | `ffprobe` | 从 `PATH` 查找 |
-| `FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS` | `1` | 同时运行的 ffmpeg 进程数 |
+| `FFMPEG_REMOTE_UI_HTTP_ADDR` | `127.0.0.1:0` | Listen address; `:0` lets the system pick a port |
+| `FFMPEG_REMOTE_UI_MEDIA_ROOTS` | empty | Directories that may be accessed, `:`-separated; empty means unrestricted |
+| `FFMPEG_REMOTE_UI_FFMPEG_PATH` | `ffmpeg` | Resolved from `PATH` |
+| `FFMPEG_REMOTE_UI_FFPROBE_PATH` | `ffprobe` | Resolved from `PATH` |
+| `FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS` | `1` | Number of concurrent ffmpeg processes |
 
-例如：
+For example:
 
 ```bash
 FFMPEG_REMOTE_UI_HTTP_ADDR=:8090 \
@@ -116,118 +140,134 @@ FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
   ./ffmpeg-remote-ui
 ```
 
-## 硬件加速
+## Hardware acceleration
 
-硬件编码**先要解决设备权限**，这是最容易卡住的一步：`/dev/dri/renderD*` 的
-属主是 `root:render`、权限 `rw-rw----`，运行程序的账户不在 `render` 组里时，
-FFmpeg 根本打不开设备，但报出来的是含糊的
-`Device creation failed: -542398533`（`AVERROR_EXTERNAL`），很容易被误判成
-驱动或 QSV 运行时缺库。
+Hardware encoding **starts with device permissions**, and this is where people get
+stuck most often: `/dev/dri/renderD*` is owned by `root:render` with mode
+`rw-rw----`, so when the account running the program is not in the `render` group,
+FFmpeg cannot even open the device — yet all it prints is the vague
+`Device creation failed: -542398533` (`AVERROR_EXTERNAL`), which is easily misread
+as a missing driver or a missing QSV runtime.
 
-先看清设备与自己的组：
-
-```bash
-ls -l /dev/dri/            # renderD128/renderD129 的属主与权限
-ls -l /dev/dri/by-path/    # PCI 地址 → 节点，用来对应到具体哪块卡
-id                         # 当前账户是否在 render / video 组里
-```
-
-`by-path` 那步尤其有用：核显通常在 `0000:00:02.0`，独显在插槽地址上，一眼就能
-看出哪个节点是哪块 GPU——程序里「硬件设备」选择器展示的就是这个对应关系。
-
-程序还会显示**型号名**（例如 `DG1 [Iris Xe MAX Graphics]`），来源是系统的 PCI ID
-数据库（`/usr/share/{misc,hwdata}/pci.ids` 等常见位置）。型号只用于辨认设备，
-不参与任何能力判断；数据库不存在时自动退回显示 `vendor:device` ID，例如
-`8086:4905`。缺型号的话装 `pciutils` 即可。
-
-修复方式（改完要**重新登录**，或重启以后台方式运行的服务）：
+Start by looking at the devices and at your own groups:
 
 ```bash
-sudo usermod -aG render,video <运行程序的账户>
+ls -l /dev/dri/            # owner and mode of renderD128/renderD129
+ls -l /dev/dri/by-path/    # PCI address → node, to map nodes to cards
+id                         # whether the account is in render / video
 ```
 
-临时验证也可以用 `sudo chmod 666 /dev/dri/renderD*`，但重启后就失效了。
+The `by-path` step is especially handy: integrated GPUs usually sit at
+`0000:00:02.0` and discrete ones on a slot address, so you can tell at a glance
+which node is which GPU — this is exactly the mapping the "hardware device"
+selector in the UI shows.
 
-接着确认驱动侧就绪——`vainfo` 能列出 profile，说明硬件与驱动都没问题：
+The program also displays **model names** (for instance
+`DG1 [Iris Xe MAX Graphics]`), resolved from the system PCI ID database
+(`/usr/share/{misc,hwdata}/pci.ids` and similar locations). Names are only used to
+tell devices apart and never take part in capability decisions; when the database
+is missing the UI falls back to the `vendor:device` ID, such as `8086:4905`.
+Install `pciutils` if names are missing.
+
+To fix permissions (you must **log in again** afterwards, or restart a service that
+runs in the background):
+
+```bash
+sudo usermod -aG render,video <the account running the program>
+```
+
+For a quick check `sudo chmod 666 /dev/dri/renderD*` also works, but it is lost on
+reboot.
+
+Then confirm the driver side is ready — if `vainfo` lists profiles, both hardware
+and driver are fine:
 
 ```bash
 sudo vainfo --display drm --device /dev/dri/renderD128
 ```
 
-在容器里运行时，除了账户要在组里，设备本身也要传进去：
+When running in a container, the account must be in the group *and* the device has
+to be passed through:
 
 ```bash
 docker run --device /dev/dri:/dev/dri --group-add render --group-add video …
 ```
 
-权限通了之后，在「编码参数」面板选硬件设备类型（`qsv`、`vaapi`…）与节点，即可
-生成 `-init_hw_device <type>=hw:<node>`。建议先用最小命令确认编码器真的可用，
-再去跑长任务：
+Once permissions work, pick a hardware device type (`qsv`, `vaapi`, …) and a node in
+the "encoding parameters" panel, and it will emit
+`-init_hw_device <type>=hw:<node>`. It is worth confirming that the encoder really
+works with a minimal command before running long jobs:
 
 ```bash
 ffmpeg -hide_banner -init_hw_device qsv=hw:/dev/dri/renderD129 \
   -f lavfi -i nullsrc -frames:v 1 -c:v hevc_qsv -f null -
 ```
 
-多 GPU 时记得挑对卡：核显与独显支持的档次常常不同（例如 UHD 630 的 HEVC 编码
-只到 8-bit，DG1 支持 10-bit）。
+With multiple GPUs, make sure you pick the right one: their capabilities often
+differ (the UHD 630 only encodes HEVC up to 8-bit, while the DG1 handles 10-bit).
 
-## 开发
+## Development
 
 ```bash
 cd frontend
 npm install
 npm run typecheck
-API_TARGET=http://127.0.0.1:8090 npm run dev   # 后端另行启动在 8090
+API_TARGET=http://127.0.0.1:8090 npm run dev   # start the backend separately on 8090
 ```
 
-`API_TARGET` 属于前端工具链（只被 `vite.config.ts` 的 dev 代理读取），
-所以没有加 `FFMPEG_REMOTE_UI_` 前缀。
+`API_TARGET` belongs to the frontend toolchain (it is only read by the dev proxy in
+`vite.config.ts`), so it does not carry the `FFMPEG_REMOTE_UI_` prefix.
 
-## 接口一览
+## API
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 | --- | --- | --- |
-| GET | `/api/health` | 运行状态、Go 版本、并发上限、生效的媒体目录 |
-| GET | `/api/ffmpeg` | FFmpeg 能力快照 |
-| POST | `/api/ffmpeg/refresh` | 重新查询能力（换过 FFmpeg 版本后） |
-| GET | `/api/ffmpeg/help?target=&name=` | `ffmpeg -h` 的结构化结果 + 原始输出 |
-| GET | `/api/probe?path=` | 服务器端 ffprobe |
-| GET | `/api/files?path=` | 目录浏览（含大小、修改时间、扩展名） |
-| GET | `/api/hardware` | DRM 设备 |
-| POST | `/api/command` | argv 或手写文本 → 最终命令预览 |
-| GET / POST | `/api/jobs` | 任务列表 / 入队 |
-| GET | `/api/jobs/{id}`、`/api/jobs/{id}/log` | 单个任务与其日志 |
-| POST | `/api/jobs/{id}/cancel`、`/api/jobs/{id}/retry` | 取消 / 重试 |
-| DELETE | `/api/jobs/{id}` | 删除 |
-| POST | `/api/jobs/clear` | 清理已结束的任务 |
-| GET | `/api/events` | SSE：任务与日志的增量事件 |
+| GET | `/api/health` | Runtime status, Go version, concurrency limit, effective media roots |
+| GET | `/api/ffmpeg` | FFmpeg capability snapshot |
+| POST | `/api/ffmpeg/refresh` | Re-query capabilities (after changing FFmpeg versions) |
+| GET | `/api/ffmpeg/help?target=&name=` | Structured `ffmpeg -h` result plus raw output |
+| GET | `/api/probe?path=` | Server-side ffprobe |
+| GET | `/api/files?path=` | Directory listing (size, mtime, extension) |
+| GET | `/api/hardware` | DRM devices |
+| POST | `/api/command` | argv or free-form text → final command preview |
+| GET / POST | `/api/jobs` | List jobs / enqueue one |
+| GET | `/api/jobs/{id}`, `/api/jobs/{id}/log` | A single job and its log |
+| POST | `/api/jobs/{id}/cancel`, `/api/jobs/{id}/retry` | Cancel / retry |
+| DELETE | `/api/jobs/{id}` | Delete |
+| POST | `/api/jobs/clear` | Remove finished jobs |
+| GET | `/api/events` | SSE: incremental job and log events |
 
-## 安全边界
+## Security boundary
 
-这是面向**可信内网**的工具：**没有账号体系**，接口能执行 ffmpeg、浏览目录、
-读写文件。默认只监听 `127.0.0.1`，请勿直接暴露到公网；要跨机使用，建议放在
-带认证的反向代理之后。
+This is a tool for a **trusted internal network**: there is **no authentication**,
+and the API can execute ffmpeg, browse directories, and read and write files. It
+listens on `127.0.0.1` by default — do not expose it to the internet. To use it
+across machines, put it behind an authenticating reverse proxy.
 
-`FFMPEG_REMOTE_UI_MEDIA_ROOTS` 是**防误操作的下限，不是安全边界**：
+`FFMPEG_REMOTE_UI_MEDIA_ROOTS` is a **guard against mistakes, not a security
+boundary**:
 
-- 它约束 `input`/`output` 字段，并对 `args` 里出现的绝对路径与显式相对路径
-  （`./x`、`../x`）做同样的校验，所以 `-i /etc/shadow`、`-vf subtitles=../x`
-  这类写法会被拒绝。
-- 但它挡不住 **concat 列表文件**里写的路径，也挡不住不带任何前缀的相对路径
-  （那取决于进程的工作目录）；接口本身也不区分调用者身份。
+- It constrains the `input`/`output` fields and applies the same check to absolute
+  paths and explicit relative paths (`./x`, `../x`) found in `args`, so constructs
+  like `-i /etc/shadow` or `-vf subtitles=../x` are rejected.
+- It cannot stop paths written inside a **concat list file**, nor relative paths
+  with no prefix at all (those depend on the process working directory); the API
+  also does not distinguish between callers.
 
-真正的隔离请交给运行账户的文件权限：用一个只能读媒体目录的账户运行本程序，
-需要写入的目录单独授权。
+Real isolation is up to the file permissions of the account running the program:
+run it as an account that can only read the media directories, and grant write
+access separately.
 
-## 许可证
+## License
 
 Copyright (C) 2026 Myrrhwhis <i@l0u0l.com>
 
-以 **GNU Affero General Public License v3.0 或更高版本**发布，完整条款见
-[LICENSE](LICENSE)。
+Released under the **GNU Affero General Public License v3.0 or later**; see
+[LICENSE](LICENSE) for the full terms.
 
-AGPL 与其他开源许可证的分歧只在网络服务这一档：把修改后的版本架在服务器上对外
-提供，并不构成"分发二进制"，传统 GPL 管不到；AGPL 第 13 条补上了这个缺口——
-**只要用户通过网络与它交互，就必须向这些用户提供对应的源码**。因此改过的版本
-不能闭源地做成对外服务。自己内部部署、不对外提供服务时不受这一条约束。
+Where AGPL differs from other open-source licenses is the network-service clause:
+serving a modified version from a server does not count as "distributing a binary",
+which classic GPL would not reach. AGPL section 13 closes that gap — **if users
+interact with it over a network, you must offer them the corresponding source**. So
+a modified version cannot be run as a closed-source service. Internal deployments
+that are not offered to others are unaffected.
