@@ -12,6 +12,9 @@ import (
 )
 
 // Device 是一个 DRM render node。
+//
+// VendorName / DeviceName 来自系统的 PCI ID 数据库，纯属「给人看的标签」：
+// 多块 GPU 时用来认出哪块是哪块，不参与任何能力判断。
 type Device struct {
 	ID         string            `json:"id"`
 	RenderNode string            `json:"renderNode,omitempty"`
@@ -20,6 +23,8 @@ type Device struct {
 	Driver     string            `json:"driver,omitempty"`
 	Vendor     string            `json:"vendor,omitempty"`
 	DeviceID   string            `json:"deviceId,omitempty"`
+	VendorName string            `json:"vendorName,omitempty"`
+	DeviceName string            `json:"deviceName,omitempty"`
 	PCIAddress string            `json:"pciAddress,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
@@ -44,6 +49,8 @@ func DiscoverRenderNodes() []Device {
 		d.Driver = readDriver(sysfs)
 		d.Vendor = readOne(sysfs, "vendor")
 		d.DeviceID = readOne(sysfs, "device")
+		// 型号名只用于显示；数据库缺失时留空，界面回退展示 ID。
+		d.VendorName, d.DeviceName = lookupPCINames(d.Vendor, d.DeviceID)
 		d.PCIAddress = pciAddress(sysfs)
 		readUevent(filepath.Join(sysfs, "uevent"), d.Properties)
 		devices = append(devices, d)
