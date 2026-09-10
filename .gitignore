@@ -1,0 +1,19 @@
+# 构建产物
+/ffmpeg-remote-ui
+/frontend/dist/
+# go:embed 目录：由 build.sh 从 frontend/dist 复制而来
+cmd/*/web/
+
+# 依赖
+/frontend/node_modules/
+
+# 本地验证产物（端到端测试的媒体与 playwright 中间文件）
+/.e2e/
+/.playwright-cli/
+
+# 本机工具状态（Reasonix 的会话与任务日志）
+/.reasonix/
+
+# 编辑器与系统
+.DS_Store
+*.swp

@@ -1,0 +1,21 @@
+# 统一以 LF 存入仓库，检出时按平台自动转换（Windows 上是 CRLF）。
+* text=auto
+
+# shell 脚本必须始终是 LF，否则在 Linux 上无法执行。
+*.sh text eol=lf
+
+# 以下为二进制文件，不做行尾转换与文本 diff。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp3 binary
+*.mp4 binary
+*.mkv binary
+
+package-lock.json -diff linguist-generated
