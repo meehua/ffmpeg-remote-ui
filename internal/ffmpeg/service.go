@@ -38,26 +38,30 @@ type Item struct {
 
 // Snapshot 是某一时刻 FFmpeg 暴露的全部能力。
 type Snapshot struct {
-	GeneratedAt   time.Time `json:"generatedAt"`
-	FFmpegPath    string    `json:"ffmpegPath"`
-	FFprobePath   string    `json:"ffprobePath"`
-	Version       string    `json:"version"`
-	BuildConfig   string    `json:"buildConfig"`
-	HWAccels      []string  `json:"hwaccels"`
-	Encoders      []Item    `json:"encoders"`
-	Decoders      []Item    `json:"decoders"`
-	Filters       []Item    `json:"filters"`
-	Formats       []Item    `json:"formats"`
-	Muxers        []Item    `json:"muxers"`
-	Demuxers      []Item    `json:"demuxers"`
-	Bitstream     []Item    `json:"bitstreamFilters"`
-	Protocols     []Item    `json:"protocols"`
-	Devices       []Item    `json:"devices"`
-	PixelFormats  []Item    `json:"pixelFormats"`
-	SampleFormats []Item    `json:"sampleFormats"`
-	Layouts       []Item    `json:"layouts"`
-	Colors        []Item    `json:"colors"`
-	Dispositions  []Item    `json:"dispositions"`
+	GeneratedAt time.Time `json:"generatedAt"`
+	FFmpegPath  string    `json:"ffmpegPath"`
+	FFprobePath string    `json:"ffprobePath"`
+	Version     string    `json:"version"`
+	BuildConfig string    `json:"buildConfig"`
+	HWAccels    []string  `json:"hwaccels"`
+	// HWDeviceTypes 来自 `ffmpeg -init_hw_device list`：这套 FFmpeg 支持哪些
+	// 硬件设备类型（qsv、vaapi、cuda…）。它回答「有哪些类型」，不承诺某个类型
+	// 在本机真的可用——真正能不能用取决于驱动与设备权限。
+	HWDeviceTypes []string `json:"hwDeviceTypes"`
+	Encoders      []Item   `json:"encoders"`
+	Decoders      []Item   `json:"decoders"`
+	Filters       []Item   `json:"filters"`
+	Formats       []Item   `json:"formats"`
+	Muxers        []Item   `json:"muxers"`
+	Demuxers      []Item   `json:"demuxers"`
+	Bitstream     []Item   `json:"bitstreamFilters"`
+	Protocols     []Item   `json:"protocols"`
+	Devices       []Item   `json:"devices"`
+	PixelFormats  []Item   `json:"pixelFormats"`
+	SampleFormats []Item   `json:"sampleFormats"`
+	Layouts       []Item   `json:"layouts"`
+	Colors        []Item   `json:"colors"`
+	Dispositions  []Item   `json:"dispositions"`
 }
 
 // ---------------------------------------------------------------- -h 结构
@@ -253,6 +257,9 @@ func (s *Service) Refresh() error {
 
 	snap.HWAccels = parseHWAccels(mustRun(s, "-hide_banner", "-hwaccels"))
 	sort.Strings(snap.HWAccels)
+
+	snap.HWDeviceTypes = parseHWDeviceTypes(mustRun(s, "-hide_banner", "-init_hw_device", "list"))
+	sort.Strings(snap.HWDeviceTypes)
 
 	s.mu.Lock()
 	s.snap = snap
@@ -465,6 +472,22 @@ func parseHWAccels(raw string) []string {
 	var out []string
 	for _, it := range parseNameTable(raw) {
 		out = append(out, it.Name)
+	}
+	return out
+}
+
+// parseHWDeviceTypes 读取 `ffmpeg -init_hw_device list`。
+//
+// 输出先是若干行说明文字，随后每行一个设备类型；这里只取类型名，与 -hwaccels
+// 一样属于「FFmpeg 自己报告的事实」，代码不据此推断任何型号或能力。
+func parseHWDeviceTypes(raw string) []string {
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasSuffix(line, ":") {
+			continue
+		}
+		out = append(out, line)
 	}
 	return out
 }
