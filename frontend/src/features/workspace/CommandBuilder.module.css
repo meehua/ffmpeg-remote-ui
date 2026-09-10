@@ -78,9 +78,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  max-block-size: 28rem;
-  overflow-block: auto;
-  overscroll-behavior-block: contain;
 }
 
 .row {

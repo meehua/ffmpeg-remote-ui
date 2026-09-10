@@ -10,9 +10,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  max-block-size: 62vh;
-  overflow-block: auto;
-  overscroll-behavior-block: contain;
   border-block-start: 1px solid var(--line);
 }
 
@@ -203,8 +200,6 @@
 
 .pre {
   margin: 0;
-  max-block-size: 24rem;
-  overflow-block: auto;
   padding-block: var(--gap-xs);
   padding-inline: var(--gap-xs);
   color: var(--text-muted);

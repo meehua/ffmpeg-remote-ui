@@ -80,8 +80,6 @@
 
 .log {
   margin: 0;
-  max-block-size: 16rem;
-  overflow-block: auto;
   padding-block: var(--gap-xs);
   padding-inline: var(--gap-sm);
   border-radius: var(--radius-sm);

@@ -33,8 +33,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  max-block-size: 12rem;
-  overflow-block: auto;
 }
 
 .planItem {
@@ -64,8 +62,6 @@
 
 .command {
   margin: 0;
-  max-block-size: 10rem;
-  overflow-block: auto;
   padding-block: var(--gap-xs);
   padding-inline: var(--gap-xs);
   border-radius: var(--radius-sm);

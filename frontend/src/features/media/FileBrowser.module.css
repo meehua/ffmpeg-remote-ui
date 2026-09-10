@@ -28,10 +28,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  /* 列表自己滚，标题与工具条留在原处。 */
-  max-block-size: 24rem;
-  overflow-block: auto;
-  overscroll-behavior-block: contain;
   border-block-start: 1px solid var(--line);
 }
 

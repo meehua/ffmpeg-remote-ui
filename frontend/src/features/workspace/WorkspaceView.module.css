@@ -79,8 +79,6 @@
 
 .command {
   margin: 0;
-  max-block-size: 12rem;
-  overflow-block: auto;
   color: var(--text);
   font-size: var(--text-xs);
   line-height: 1.6;
