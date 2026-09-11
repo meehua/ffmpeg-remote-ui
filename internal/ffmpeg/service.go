@@ -176,12 +176,20 @@ type Service struct {
 	mu   sync.RWMutex
 	snap Snapshot
 
-	helpMu sync.Mutex
-	help   map[string]Help
+	helpMu   sync.Mutex
+	help     map[string]Help
+	cliCache map[string]CliHelp
+	extCache map[string]ExtensionsResult
 }
 
 func NewService(ffmpegPath, ffprobePath string) *Service {
-	s := &Service{ffmpeg: ffmpegPath, ffprobe: ffprobePath, help: map[string]Help{}}
+	s := &Service{
+		ffmpeg:   ffmpegPath,
+		ffprobe:  ffprobePath,
+		help:     map[string]Help{},
+		cliCache: map[string]CliHelp{},
+		extCache: map[string]ExtensionsResult{},
+	}
 	_ = s.Refresh()
 	return s
 }
@@ -264,13 +272,48 @@ func (s *Service) Refresh() error {
 	s.mu.Lock()
 	s.snap = snap
 	s.mu.Unlock()
+
+	// 换过 FFmpeg 之后，先前按旧二进制缓存下来的东西全部作废：
+	// 组件的 -h、命令行拓扑、扩展名汇总都会随版本变。
+	// 少了这一步，用户点了「重新查询能力」，命令行选项面板却还是旧的。
+	s.helpMu.Lock()
+	s.help = map[string]Help{}
+	s.cliCache = map[string]CliHelp{}
+	s.extCache = map[string]ExtensionsResult{}
+	s.helpMu.Unlock()
 	return nil
 }
 
 func (s *Service) Snapshot() Snapshot {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.snap
+	snap := s.snap
+	s.mu.RUnlock()
+	snap.normalize()
+	return snap
+}
+
+// normalize 把快照里的各个列表统一成非 nil。
+//
+// 这条约定值得单独写一段，因为它背后的连锁反应很不好查：Go 的 nil 切片会
+// 序列化成 JSON 的 null，前端对 null 读一次 .length 就抛异常，而 React 在渲染
+// 期抛异常会把**整棵树**卸掉——用户看到的不是「这一块坏了」，而是连 logo 都
+// 没了的空白页。所以出口处一律给空切片（hardware 包早就这么做了）。
+func (snap *Snapshot) normalize() {
+	for _, list := range []*[]Item{
+		&snap.Encoders, &snap.Decoders, &snap.Filters, &snap.Formats,
+		&snap.Muxers, &snap.Demuxers, &snap.Bitstream, &snap.Protocols,
+		&snap.Devices, &snap.PixelFormats, &snap.SampleFormats, &snap.Layouts,
+		&snap.Colors, &snap.Dispositions,
+	} {
+		if *list == nil {
+			*list = []Item{}
+		}
+	}
+	for _, list := range []*[]string{&snap.HWAccels, &snap.HWDeviceTypes} {
+		if *list == nil {
+			*list = []string{}
+		}
+	}
 }
 
 // Help 返回组件的结构化帮助，结果按目标缓存。
