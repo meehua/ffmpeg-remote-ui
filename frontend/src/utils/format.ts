@@ -3,6 +3,16 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
 }
 
+/**
+ * 判断一个来自 JSON 的值是不是普通对象。
+ *
+ * 存档、预设与接口响应都是从外部读进来的，用它可以先把「形状不对」的情况
+ * 挡在外面，后面的字段读取就不必层层判空。
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** 1536 → "1.5 KB"，用于展示文件大小与码率。 */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';

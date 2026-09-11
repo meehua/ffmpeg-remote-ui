@@ -1,5 +1,8 @@
 import type {
+  CliHelp,
   CommandPreview,
+  ConfigInfo,
+  ExtensionsResult,
   FFHelp,
   FilesResponse,
   HardwareInfo,
@@ -8,6 +11,9 @@ import type {
   Job,
   LogLine,
   MediaInfo,
+  PresetListResponse,
+  PresetRecord,
+  ScanResponse,
   Snapshot,
 } from './types';
 
@@ -72,6 +78,22 @@ export const api = {
   refreshSnapshot: () => request<Snapshot>('/api/ffmpeg/refresh', { method: 'POST' }),
 
   /**
+   * ffmpeg 自己的命令行拓扑（分节 → 选项）。
+   *
+   * 界面的控件结构直接跟着它走：有哪些段、每段有哪些选项、哪个选项要取值，
+   * 全部由 ffmpeg 决定，程序不维护自己的选项表。
+   */
+  cli: (level = 'long') => request<CliHelp>(`/api/ffmpeg/cli${query({ level })}`),
+
+  /**
+   * ffmpeg 自己声明的文件扩展名。
+   *
+   * 输入侧用 demuxer、输出侧用 muxer：两侧能读能写的格式并不相同。
+   */
+  extensions: (target: 'demuxer' | 'muxer') =>
+    request<ExtensionsResult>(`/api/ffmpeg/extensions${query({ target })}`),
+
+  /**
    * 读取某个组件的 ffmpeg -h。
    *
    * 目标不存在时后端返回 200 并在 body 里带 error，因为 ffmpeg 的原始
@@ -108,6 +130,31 @@ export const api = {
 
   jobLog: (id: string) =>
     request<{ id: string; lines: LogLine[] }>(`/api/jobs/${encodeURIComponent(id)}/log`),
+
+  /** 本次运行的生效设置，以及每一项的来源。 */
+  config: () => request<ConfigInfo>('/api/config'),
+
+  /** 递归列出一个目录下的媒体候选文件。 */
+  scan: (path: string, ext = '', limit?: number) =>
+    request<ScanResponse>(`/api/files/scan${query({ path, ext, limit: limit?.toString() })}`),
+
+  /** 创建输出目录（含父目录）；批量任务还原目录结构时用。 */
+  createDirs: (dirs: string[]) =>
+    request<{ created: number; existing: number }>('/api/dirs', jsonPost({ dirs })),
+
+  presets: () => request<PresetListResponse>('/api/presets'),
+
+  readPreset: (name: string) => request<PresetRecord>(`/api/presets/${encodeURIComponent(name)}`),
+
+  /** 覆盖保存一份预设（PUT 语义：这个名字现在就是这份配方）。 */
+  savePreset: (name: string, recipe: unknown) =>
+    request<PresetRecord>(`/api/presets/${encodeURIComponent(name)}`, {
+      ...jsonPost({ recipe }),
+      method: 'PUT',
+    }),
+
+  deletePreset: (name: string) =>
+    request<unknown>(`/api/presets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };
 
 export type { FFHelp };

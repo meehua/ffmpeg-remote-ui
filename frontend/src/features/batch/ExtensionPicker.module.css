@@ -1,0 +1,66 @@
+/*
+ * 扩展名选择面板：默认收起，展开后是筛选框 + 两个按钮 + 一片可勾选的标签。
+ * 不加内层滚动条——项目里滚动只由外壳那两层负责。
+ */
+.picker {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-xs);
+  padding-block: var(--gap-xs);
+  padding-inline: var(--gap-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.meta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding-block: 0 var(--gap-sm);
+  padding-inline: var(--gap-sm);
+}
+
+.note {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-block: 0.1rem;
+  padding-inline: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.itemOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}

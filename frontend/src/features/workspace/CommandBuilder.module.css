@@ -136,3 +136,44 @@
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * 命令行选项：分节名直接用 ffmpeg 的原文，因此这里只做排版，不做命名。
+ * 一节一个折叠块，默认收起——`ffmpeg -h long` 就有 200 个选项，全展开没人看得下去。
+ */
+.cliSection {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.cliSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-xs);
+  padding-block: var(--gap-xs);
+  padding-inline: var(--gap-xs);
+  cursor: pointer;
+}
+
+.cliName {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.cliMeta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+/* 插入位置：只在 ffmpeg 没说清单侧时才出现，窄到不抢视线。 */
+.position {
+  flex: none;
+  inline-size: auto;
+  margin-inline-start: auto;
+  padding-block: 0.1rem;
+  padding-inline: 0.35rem;
+  font-size: var(--text-xs);
+}

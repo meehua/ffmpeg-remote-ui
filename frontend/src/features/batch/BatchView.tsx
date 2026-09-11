@@ -1,19 +1,33 @@
 import { useMemo, useState } from 'react';
 
 import { api } from '../../api/client';
-import type { GpuDevice, Job, LogLine, Snapshot } from '../../api/types';
+import type { CliHelp, GpuDevice, Job, LogLine, Snapshot } from '../../api/types';
 import { Button, ButtonRow, Field, Switch, TextArea, TextInput } from '../../components/Controls';
 import { EmptyState, ErrorNote } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
-import { useAction } from '../../hooks/useAsync';
+import { useAction, useAsync } from '../../hooks/useAsync';
+import { usePersistentState } from '../../hooks/usePersistentState';
 import { baseName } from '../../utils/format';
 import { JobPanel } from '../jobs/JobPanel';
+import { PresetBar } from '../presets/PresetBar';
+import type { Recipe } from '../presets/recipe';
 import { CommandBuilder } from '../workspace/CommandBuilder';
-import { buildArgs, emptySettings, joinArgs, type EncodeSettings } from '../workspace/args';
+import {
+  buildArgs,
+  emptySettings,
+  hasOverwrite,
+  joinArgs,
+  normalizeSettings,
+  withOverwrite,
+  type EncodeSettings,
+} from '../workspace/args';
+import { ExtensionPicker } from './ExtensionPicker';
 import styles from './BatchView.module.css';
 
 interface BatchViewProps {
   snapshot: Snapshot | null;
+  /** ffmpeg 自己的命令行拓扑；控件的结构跟着它走。 */
+  cliHelp: CliHelp | null;
   /** 服务器上真实存在的 DRM 设备，供「硬件设备」选择使用。 */
   devices: GpuDevice[];
   jobs: Job[];
@@ -22,52 +36,159 @@ interface BatchViewProps {
 
 const PREVIEW_LIMIT = 12;
 
-/** 按「目录 + 原名 + 后缀 + 扩展名」推出输出路径。 */
-function outputPathFor(input: string, dir: string, suffix: string, ext: string): string {
-  const name = baseName(input);
+/** 去掉最后一个扩展名；没有扩展名时原样返回。 */
+function stripExtension(name: string): string {
   const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const wanted = ext.trim().replace(/^\./, '');
-  const original = dot > 0 ? name.slice(dot + 1) : '';
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+/**
+ * 输入文件相对扫描根的那一段（保留子目录、去掉扩展名）。
+ *
+ * 返回 null 表示这个文件不在扫描根下（用户手工加进来的，或者换了扫描根），
+ * 此时退回平铺到输出目录，而不是猜一个结构出来。
+ */
+function relativeStem(input: string, root: string): string | null {
+  const base = root.trim().replace(/\/+$/, '');
+  if (base === '' || !input.startsWith(`${base}/`)) {
+    return null;
+  }
+  const rel = input.slice(base.length + 1);
+  const name = baseName(rel);
+  return rel.slice(0, rel.length - name.length) + stripExtension(name);
+}
+
+interface OutputNaming {
+  dir: string;
+  suffix: string;
+  ext: string;
+  /** 还原目录结构时的参照根；为空表示平铺。 */
+  root: string;
+}
+
+/**
+ * 按「目录 + 相对路径 + 后缀 + 扩展名」推出输出路径。
+ *
+ * 扩展名始终由「输出扩展名」设置决定：还原目录结构只负责把文件放回原来的
+ * 子目录，命名仍然归命名设置管，两件事互不干扰。
+ */
+function outputPathFor(input: string, naming: OutputNaming): string {
+  const name = baseName(input);
+  const original = name.slice(stripExtension(name).length).replace(/^\./, '');
+  const wanted = naming.ext.trim().replace(/^\./, '');
   const extension = wanted !== '' ? wanted : original;
   const tail = extension === '' ? '' : `.${extension}`;
-  return `${dir.replace(/\/+$/, '')}/${stem}${suffix}${tail}`;
+
+  const prefix = relativeStem(input, naming.root) ?? stripExtension(name);
+  return `${naming.dir.replace(/\/+$/, '')}/${prefix}${naming.suffix}${tail}`;
+}
+
+/** 输出文件所在的目录，去重后用于提交前预先创建。 */
+function uniqueDirs(outputs: string[]): string[] {
+  const dirs = new Set<string>();
+  for (const output of outputs) {
+    const index = output.lastIndexOf('/');
+    if (index > 0) {
+      dirs.add(output.slice(0, index));
+    }
+  }
+  return [...dirs];
 }
 
 /** 批处理：一组输入文件套用同一套参数。 */
-export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
-  const [inputs, setInputs] = useState('');
-  const [outDir, setOutDir] = useState('');
-  const [suffix, setSuffix] = useState('');
-  const [ext, setExt] = useState('');
-  const [settings, setSettings] = useState<EncodeSettings>(emptySettings);
-  const [extraArgs, setExtraArgs] = useState('');
-  const [overwrite, setOverwrite] = useState(false);
+export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewProps) {
+  // 与工作区同理：状态放进浏览器本地存档，来回切换与刷新都不会白填。
+  const [inputs, setInputs] = usePersistentState('batch.inputs', '');
+  const [outDir, setOutDir] = usePersistentState('batch.outDir', '');
+  const [suffix, setSuffix] = usePersistentState('batch.suffix', '');
+  const [ext, setExt] = usePersistentState('batch.ext', '');
+  const [settings, setSettings] = usePersistentState<EncodeSettings>(
+    'batch.settings',
+    emptySettings,
+    normalizeSettings,
+  );
+  const [extraArgs, setExtraArgs] = usePersistentState('batch.extraArgs', '');
+
+  const [scanDir, setScanDir] = usePersistentState('batch.scanDir', '');
+  const [scanExts, setScanExts] = usePersistentState('batch.scanExts', '');
+  const [keepTree, setKeepTree] = usePersistentState('batch.keepTree', true);
+
   const [report, setReport] = useState<string | null>(null);
+  const [scanNote, setScanNote] = useState<string | null>(null);
+
+  // 输出扩展名的候选来自 muxer：能写什么格式由 ffmpeg 说了算，
+  // 这里只是把它的说法摆成一个可下拉的列表。
+  const muxerExtensions = useAsync(() => api.extensions('muxer'), []);
 
   const submit = useAction();
+  const scan = useAction();
 
   const plan = useMemo(() => {
+    const dir = outDir.trim();
     return inputs
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '')
       .map((input) => {
-        const output = outDir.trim() === '' ? '' : outputPathFor(input, outDir.trim(), suffix, ext);
-        return {
-          input,
-          output,
-          args: buildArgs({ input, output, settings, extraArgs, overwrite }),
-        };
+        const output =
+          dir === ''
+            ? ''
+            : outputPathFor(input, { dir, suffix, ext, root: keepTree ? scanDir : '' });
+        return { input, output, args: buildArgs({ input, output, settings, extraArgs }) };
       });
-  }, [inputs, outDir, suffix, ext, settings, extraArgs, overwrite]);
+  }, [inputs, outDir, suffix, ext, scanDir, keepTree, settings, extraArgs]);
 
   const ready = plan.length > 0 && outDir.trim() !== '';
+
+  const recipe: Recipe = useMemo(
+    () => ({ settings, extraArgs, naming: { suffix, ext } }),
+    [settings, extraArgs, suffix, ext],
+  );
+
+  const applyRecipe = (loaded: Recipe) => {
+    setSettings(loaded.settings);
+    setExtraArgs(loaded.extraArgs);
+    if (loaded.naming) {
+      setSuffix(loaded.naming.suffix);
+      setExt(loaded.naming.ext);
+    }
+  };
+
+  const runScan = async () => {
+    setScanNote(null);
+    const dir = scanDir.trim();
+    if (dir === '') {
+      return;
+    }
+    await scan.run(async () => {
+      const result = await api.scan(dir, scanExts);
+      if (result.files.length > 0) {
+        setInputs(result.files.map((file) => file.path).join('\n'));
+      }
+      const notes = [`扫到 ${result.files.length} 个文件`];
+      if (result.skipped > 0) {
+        notes.push(`跳过 ${result.skipped} 个读不了的条目`);
+      }
+      if (result.truncated) {
+        notes.push(`已达到 ${result.limit} 个的上限，还有文件没列出来`);
+      }
+      if (result.files.length === 0) {
+        notes.push('可以放宽扩展名过滤或换一个目录');
+      }
+      setScanNote(`${notes.join('；')}。`);
+    });
+  };
 
   const enqueueAll = async () => {
     setReport(null);
     let done = 0;
     const ok = await submit.run(async () => {
+      // ffmpeg 不会自己创建目录：还原目录结构时输出会落到若干子目录里，
+      // 所以先把它们建出来，否则整批任务会在启动时失败。
+      const dirs = uniqueDirs(plan.map((item) => item.output));
+      if (dirs.length > 0) {
+        await api.createDirs(dirs);
+      }
       // 逐个提交：服务器有并发上限，一次丢进去也不会更快，反而更难看清结果。
       for (const item of plan) {
         await api.createJob({ input: item.input, output: item.output, args: item.args });
@@ -77,12 +198,44 @@ export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
     setReport(ok ? `已加入 ${done} 个任务。` : `已加入 ${done} 个任务后中断。`);
   };
 
+  /** 预览里只显示相对输出目录的那一段，长前缀没有信息量。 */
+  const shorten = (path: string): string => {
+    const base = outDir.trim().replace(/\/+$/, '');
+    return base !== '' && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : baseName(path);
+  };
+
   return (
     <Panes columns={2}>
       <Pane
         title="待处理文件"
-        description="每行一个服务器上的绝对路径；输出目录必须已经存在。"
+        description="每行一个服务器上的绝对路径；也可以直接扫描一个目录。"
       >
+        <Field
+          label="扫描目录"
+          hint="递归收集目录里的文件并填到下面的列表；扩展名过滤留空表示全都收。"
+        >
+          <div className={styles.scanRow}>
+            <TextInput
+              value={scanDir}
+              placeholder="/data/media/待转码"
+              onChange={(event) => setScanDir(event.target.value)}
+            />
+            <TextInput
+              value={scanExts}
+              placeholder="mkv, mp4"
+              aria-label="扩展名过滤"
+              onChange={(event) => setScanExts(event.target.value)}
+            />
+            <Button compact disabled={scanDir.trim() === '' || scan.pending} onClick={runScan}>
+              {scan.pending ? '扫描中…' : '扫描'}
+            </Button>
+          </div>
+        </Field>
+        {scan.error ? <ErrorNote>{scan.error}</ErrorNote> : null}
+        {scanNote ? <p className={styles.planHint}>{scanNote}</p> : null}
+
+        <ExtensionPicker target="demuxer" value={scanExts} onChange={setScanExts} />
+
         <Field label="输入文件（每行一个）">
           <TextArea
             value={inputs}
@@ -94,7 +247,7 @@ export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
         </Field>
 
         <div className={styles.grid}>
-          <Field label="输出目录">
+          <Field label="输出目录" hint="不存在会自动创建">
             <TextInput
               value={outDir}
               placeholder="/data/out"
@@ -105,14 +258,33 @@ export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
             <TextInput value={suffix} onChange={(event) => setSuffix(event.target.value)} />
           </Field>
           <Field label="输出扩展名" hint="留空保留原扩展名">
-            <TextInput value={ext} placeholder="mp4" onChange={(event) => setExt(event.target.value)} />
+            {/* 候选来自 muxer 报的扩展名，用 datalist 挂在输入框上：
+                既能选，也能直接敲一个 ffmpeg 没写进帮助里的写法。 */}
+            <TextInput
+              list="frui-muxer-extensions"
+              value={ext}
+              placeholder="mp4"
+              onChange={(event) => setExt(event.target.value)}
+            />
           </Field>
         </div>
 
-        <Field
-          label="附加参数"
-          hint="原样插在输出文件之前，对这批次里的每个文件都生效。"
-        >
+        <datalist id="frui-muxer-extensions">
+          {(muxerExtensions.data?.extensions ?? []).map((item) => (
+            <option key={item} value={item} />
+          ))}
+        </datalist>
+
+        <Switch label="在输出目录里还原原目录结构" checked={keepTree} onChange={setKeepTree} />
+        <p className={styles.planHint}>
+          {keepTree
+            ? scanDir.trim() === ''
+              ? '以「扫描目录」为参照根；它为空时暂时按文件名平铺。'
+              : `子目录按相对「${scanDir.trim()}」的路径还原，扩展名仍由上面的设置决定。`
+            : '所有输出都直接放在输出目录里。'}
+        </p>
+
+        <Field label="附加参数" hint="原样插在输出文件之前，对这批次里的每个文件都生效。">
           <TextArea
             value={extraArgs}
             rows={3}
@@ -122,17 +294,24 @@ export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
           />
         </Field>
 
-        <Switch label="覆盖已存在的输出文件（-y）" checked={overwrite} onChange={setOverwrite} />
+        <Switch
+          label="覆盖已存在的输出文件（-y）"
+          checked={hasOverwrite(settings)}
+          onChange={(on) => setSettings(withOverwrite(settings, on))}
+        />
       </Pane>
 
       <Pane
         title="参数与提交"
         narrow
-        description="参数与工作区一致：全部来自服务器 FFmpeg 的能力。"
+        description="参数与工作区一致：结构来自 ffmpeg 自己的分节。"
       >
+        <PresetBar recipe={recipe} onLoad={applyRecipe} />
+
         {snapshot ? (
           <CommandBuilder
             snapshot={snapshot}
+            cliHelp={cliHelp}
             devices={devices}
             settings={settings}
             onChange={setSettings}
@@ -153,11 +332,11 @@ export function BatchView({ snapshot, devices, jobs, logs }: BatchViewProps) {
               {plan.slice(0, PREVIEW_LIMIT).map((item) => (
                 <li key={item.input} className={styles.planItem}>
                   <span className={styles.planFrom} title={item.input}>
-                    {baseName(item.input)}
+                    {shorten(item.input)}
                   </span>
                   <span aria-hidden="true">→</span>
                   <span className={styles.planTo} title={item.output}>
-                    {baseName(item.output)}
+                    {shorten(item.output)}
                   </span>
                 </li>
               ))}

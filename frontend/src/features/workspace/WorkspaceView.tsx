@@ -1,41 +1,70 @@
 import { useMemo, useState } from 'react';
 
 import { api } from '../../api/client';
-import type { HardwareInfo, Job, LogLine, MediaInfo, Snapshot } from '../../api/types';
+import type {
+  CliHelp,
+  HardwareInfo,
+  Job,
+  LogLine,
+  MediaInfo,
+  Snapshot,
+} from '../../api/types';
 import { Button, ButtonRow, Field, Switch, TextArea, TextInput } from '../../components/Controls';
 import { Badge, CopyButton, DataList, EmptyState, ErrorNote, Spinner } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
 import { useAction, useAsync } from '../../hooks/useAsync';
+import { usePersistentState } from '../../hooks/usePersistentState';
 import { formatBytes, formatDuration, toNumber } from '../../utils/format';
 import { JobPanel } from '../jobs/JobPanel';
 import { FileBrowser } from '../media/FileBrowser';
+import { PresetBar } from '../presets/PresetBar';
+import type { Recipe } from '../presets/recipe';
 import { CommandBuilder } from './CommandBuilder';
 import {
   buildArgs,
   emptySettings,
+  hasOverwrite,
   joinArgs,
+  normalizeSettings,
   splitArgs,
   stripToolPrefix,
+  withOverwrite,
   type EncodeSettings,
 } from './args';
 import styles from './WorkspaceView.module.css';
 
 interface WorkspaceViewProps {
   snapshot: Snapshot | null;
+  /** ffmpeg 自己的命令行拓扑；控件的结构跟着它走。 */
+  cliHelp: CliHelp | null;
   hardware: HardwareInfo | null;
   jobs: Job[];
   logs: Record<string, LogLine[]>;
 }
 
+/**
+ * 默认设置：覆盖输出文件。
+ *
+ * `-y` 是 ffmpeg Global options 里的一个选项，所以它存在 cli 里，而不是设置
+ * 对象上一个自成一体的布尔字段——界面上那个开关读写的就是它。
+ */
+const initialSettings = withOverwrite(emptySettings, true);
+
 /** 工作区：挑服务器上的文件、配参数、看命令、入队。 */
-export function WorkspaceView({ snapshot, hardware, jobs, logs }: WorkspaceViewProps) {
-  const [input, setInput] = useState('');
-  const [output, setOutput] = useState('');
-  const [settings, setSettings] = useState<EncodeSettings>(emptySettings);
-  const [extraArgs, setExtraArgs] = useState('');
-  const [overwrite, setOverwrite] = useState(true);
-  const [manual, setManual] = useState(false);
-  const [manualArgs, setManualArgs] = useState('');
+export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: WorkspaceViewProps) {
+  // 表单状态存进浏览器本地存档：切到别的功能域再回来、甚至刷新页面，
+  // 已经填好的路径与参数都还在。
+  const [input, setInput] = usePersistentState('workspace.input', '');
+  const [output, setOutput] = usePersistentState('workspace.output', '');
+  const [settings, setSettings] = usePersistentState<EncodeSettings>(
+    'workspace.settings',
+    initialSettings,
+    normalizeSettings,
+  );
+  const [extraArgs, setExtraArgs] = usePersistentState('workspace.extraArgs', '');
+  const [manual, setManual] = usePersistentState('workspace.manual', false);
+  const [manualArgs, setManualArgs] = usePersistentState('workspace.manualArgs', '');
+  // 「已加入队列」是一次性的反馈，不属于需要保留的配置。
   const [queued, setQueued] = useState(false);
 
   const probe = useAsync<MediaInfo | null>(
@@ -48,11 +77,19 @@ export function WorkspaceView({ snapshot, hardware, jobs, logs }: WorkspaceViewP
     if (manual) {
       return stripToolPrefix(splitArgs(manualArgs));
     }
-    return buildArgs({ input, output, settings, extraArgs, overwrite });
-  }, [manual, manualArgs, input, output, settings, extraArgs, overwrite]);
+    return buildArgs({ input, output, settings, extraArgs });
+  }, [manual, manualArgs, input, output, settings, extraArgs]);
 
   const command = joinArgs(['ffmpeg', ...args]);
   const ready = input.trim() !== '' && output.trim() !== '';
+
+  // 工作区没有批处理的命名选项，所以预设里只放设置与附加参数。
+  const recipe: Recipe = useMemo(() => ({ settings, extraArgs }), [settings, extraArgs]);
+
+  const applyRecipe = (loaded: Recipe) => {
+    setSettings(loaded.settings);
+    setExtraArgs(loaded.extraArgs);
+  };
 
   const submit = async () => {
     setQueued(false);
@@ -105,11 +142,14 @@ export function WorkspaceView({ snapshot, hardware, jobs, logs }: WorkspaceViewP
       <Pane
         title="编码参数"
         narrow
-        description="选项、取值与默认值全部来自服务器当前 FFmpeg 的 -h 输出。"
+        description="流与选项的结构来自 ffmpeg 自己的分节，取值来自它的 -h 输出。"
       >
+        <PresetBar recipe={recipe} onLoad={applyRecipe} />
+
         {snapshot ? (
           <CommandBuilder
             snapshot={snapshot}
+            cliHelp={cliHelp}
             devices={hardware?.devices ?? []}
             settings={settings}
             onChange={setSettings}
@@ -127,7 +167,11 @@ export function WorkspaceView({ snapshot, hardware, jobs, logs }: WorkspaceViewP
           />
         </Field>
 
-        <Switch label="覆盖已存在的输出文件（-y）" checked={overwrite} onChange={setOverwrite} />
+        <Switch
+          label="覆盖已存在的输出文件（-y）"
+          checked={hasOverwrite(settings)}
+          onChange={(on) => setSettings(withOverwrite(settings, on))}
+        />
       </Pane>
 
       <Pane

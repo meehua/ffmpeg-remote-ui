@@ -1,0 +1,48 @@
+/*
+ * 预设工具条。
+ *
+ * 放在参数栏顶部，用下沉表面和留白把它和下面的参数项区分开：它是「整组参数
+ * 的存取」，而不是又一个参数。两行控件在窄栏里会自动换行。
+ */
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding-block: var(--gap-sm);
+  padding-inline: var(--gap-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+/* 下拉框与输入框吃掉剩余宽度，按钮保持自然宽度。 */
+.row > :first-child {
+  flex: 1 1 8rem;
+  min-inline-size: 0;
+}
+
+.note {
+  color: var(--ok);
+  font-size: var(--text-xs);
+}
+
+.warning {
+  color: var(--warn);
+  font-size: var(--text-xs);
+}
+
+.hint {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow-block: hidden;
+  overflow-inline: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

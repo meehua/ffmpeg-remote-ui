@@ -245,3 +245,136 @@ export interface CommandPreview {
   args: string[];
   command: string;
 }
+
+/* ---------------------------------------------------------------- 运行时设置 */
+
+/** 每个设置的来源：环境变量 / 配置文件 / 内置默认值。 */
+export type ConfigSource = 'env' | 'file' | 'default';
+
+/** 一次运行的生效设置。 */
+export interface RuntimeConfig {
+  httpAddr: string;
+  /** 允许访问的媒体根目录；为空表示不限制。 */
+  mediaRoots: string[];
+  ffmpegPath: string;
+  ffprobePath: string;
+  maxConcurrentJobs: number;
+}
+
+export interface ConfigInfo {
+  /** 配置文件路径；拿不到用户配置目录时为空。 */
+  path: string;
+  /** 预设目录，和配置文件在同一个父目录下。 */
+  presetsDir: string;
+  /** 本次运行是否新建了配置文件。 */
+  created: boolean;
+  values: RuntimeConfig;
+  /** 字段名 -> 来源。 */
+  sources: Record<string, ConfigSource>;
+  /** 需要让用户知道但不致命的问题。 */
+  warnings?: string[];
+}
+
+/* ---------------------------------------------------------------- 预设 */
+
+export interface PresetMeta {
+  name: string;
+  updatedAt: string;
+  size: number;
+}
+
+export interface PresetListResponse {
+  /** 预设目录的绝对路径。 */
+  dir: string;
+  items: PresetMeta[];
+  /** 目录里读不动的文件；只提示，不影响其余预设。 */
+  warnings?: string[];
+}
+
+/** 一份预设；recipe 的结构由前端定义（见 features/presets/recipe.ts）。 */
+export interface PresetRecord {
+  name: string;
+  updatedAt: string;
+  recipe: unknown;
+}
+
+/* ---------------------------------------------------------------- 目录扫描 */
+
+export interface ScanFile {
+  path: string;
+  /** 相对扫描根的路径，用于在输出目录里还原目录结构。 */
+  rel: string;
+  size: number;
+  modTime: string;
+  ext?: string;
+}
+
+export interface ScanResponse {
+  root: string;
+  files: ScanFile[];
+  /** 本次生效的扩展名过滤；为空表示不过滤。 */
+  exts: string[] | null;
+  /** 过滤前见过的普通文件数。 */
+  visited: number;
+  /** 读不了而跳过的条目数。 */
+  skipped: number;
+  /** 达到上限、还有文件没收进来。 */
+  truncated: boolean;
+  limit: number;
+}
+
+/* ---------------------------------------------------------------- 命令行拓扑 */
+
+/**
+ * ffmpeg 命令行上一个选项的元信息，全部来自 `ffmpeg -h`。
+ *
+ * 界面据此决定控件形态与插入位置，因此这里不需要、也不允许有本程序自己
+ * 维护的选项表。
+ */
+export interface CliOption {
+  /** 不含前导 "-"，与 ffmpeg 输出一致。 */
+  name: string;
+  /** ffmpeg 允许它带 `:<stream_spec>` 后缀。 */
+  streamSpec?: boolean;
+  /** 需要取值；没有占位符的就是开关型选项。 */
+  takesValue?: boolean;
+  /** ffmpeg 给出的占位符原文，例如 `<time_off>`。 */
+  placeholder?: string;
+  description?: string;
+}
+
+/** 作用范围，由 ffmpeg 写在分节标题里的措辞推出来。 */
+export type CliScope = 'global' | 'input' | 'output' | 'both' | 'stream' | 'other';
+
+export interface CliSection {
+  /** ffmpeg 的原文标题，例如 "Advanced per-file options (input-only)"。 */
+  name: string;
+  scope: CliScope;
+  /** 媒体类型（video/audio/subtitle/data）；通用分节没有。 */
+  media?: string;
+  /** 媒体类型的流定位符（v/a/s/d）。 */
+  spec?: string;
+  options: CliOption[];
+}
+
+/** `ffmpeg -h [level]` 的结构化结果：ffmpeg 命令行本身的拓扑。 */
+export interface CliHelp {
+  level: string;
+  sections: CliSection[];
+  raw: string;
+}
+
+/**
+ * ffmpeg 自己声明的文件扩展名汇总。
+ *
+ * 输入侧取 demuxer（能读什么），输出侧取 muxer（能写什么）。这份列表里
+ * 不会出现本程序写进去的扩展名——它整份来自 `ffmpeg -h <target>=<name>`
+ * 里的 "Common extensions"。
+ */
+export interface ExtensionsResult {
+  target: string;
+  extensions: string[];
+  /** 该方向上的组件总数，以及其中报了扩展名的数量。 */
+  components: number;
+  withExtensions: number;
+}

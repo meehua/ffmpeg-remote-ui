@@ -5,6 +5,23 @@
   gap: var(--gap-sm);
 }
 
+/* 扫描行：路径、扩展名过滤与按钮排在一行，窄栏里自动换行。 */
+.scanRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+.scanRow > input:first-child {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
+}
+
+.scanRow > input:nth-child(2) {
+  flex: 0 1 9rem;
+  min-inline-size: 0;
+}
+
 .plan {
   display: flex;
   flex-direction: column;
