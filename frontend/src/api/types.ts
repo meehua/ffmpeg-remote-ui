@@ -111,9 +111,28 @@ export interface FFHelp {
   raw: string;
 }
 
+/* ------------------------------------------------------------ 错误与警告 */
+
+/** 供界面插值的参数；与后端 apierr 的 Params 一一对应。 */
+export type ErrorParams = Record<string, string | number>;
+
+/**
+ * 一条不阻断主流程的提示（坏掉的预设文件、被忽略的配置项）。
+ *
+ * 与错误同构：后端只给码与参数，用哪种语言说由界面决定；message 是兜底原文。
+ */
+export interface ApiWarning {
+  code: string;
+  params?: ErrorParams;
+  message?: string;
+}
+
 /** -h 查询失败时后端仍会带上原始输出，方便直接展示 ffmpeg 的抱怨。 */
 export interface HelpResponse {
   error?: string;
+  /** 带码时的错误标识（见 internal/apierr）；没有码就只能显示 error。 */
+  code?: string;
+  params?: ErrorParams;
   help?: FFHelp;
 }
 
@@ -169,6 +188,7 @@ export interface Job {
   status: JobStatus;
   /** 0-100；无法估算比例时保持 0。 */
   progress: number;
+  /** 阶段码（probe / transcode），来自服务器；显示文案由界面查表。 */
   phase?: string;
   /** 排队位置，0 表示不在排队中。 */
   position: number;
@@ -184,6 +204,9 @@ export interface Job {
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  /** 带码的失败原因；事件流是单向推送，所以码挂在任务对象本身。 */
+  errorCode?: string;
+  errorParams?: ErrorParams;
 }
 
 export interface LogLine {
@@ -272,7 +295,7 @@ export interface ConfigInfo {
   /** 字段名 -> 来源。 */
   sources: Record<string, ConfigSource>;
   /** 需要让用户知道但不致命的问题。 */
-  warnings?: string[];
+  warnings?: ApiWarning[];
 }
 
 /* ---------------------------------------------------------------- 预设 */
@@ -288,7 +311,7 @@ export interface PresetListResponse {
   dir: string;
   items: PresetMeta[];
   /** 目录里读不动的文件；只提示，不影响其余预设。 */
-  warnings?: string[];
+  warnings?: ApiWarning[];
 }
 
 /** 一份预设；recipe 的结构由前端定义（见 features/presets/recipe.ts）。 */

@@ -206,7 +206,12 @@ function ConfigNotice({ info }: { info: ConfigInfo }) {
       </ul>
 
       {(info.warnings ?? []).map((warning) => (
-        <ErrorNote key={warning}>{warning}</ErrorNote>
+        <ErrorNote
+          key={warning.code}
+          code={warning.code}
+          params={warning.params}
+          fallback={warning.message}
+        />
       ))}
 
       <p className={styles.configHint}>

@@ -22,7 +22,7 @@ interface PresetBarProps {
  * 跨设备可用，也能直接手工编辑。这里只做读、写、删三件事。
  */
 export function PresetBar({ recipe, onLoad }: PresetBarProps) {
-  const { t } = useI18n();
+  const { t, has } = useI18n();
   const presets = useAsync(() => api.presets(), []);
   const [selected, setSelected] = useState('');
   const [name, setName] = useState('');
@@ -112,11 +112,15 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
         </Button>
       </div>
 
-      {action.error ? <ErrorNote>{action.error}</ErrorNote> : null}
-      {presets.error ? <ErrorNote>{presets.error}</ErrorNote> : null}
+      {action.error ? <ErrorNote error={action.error} /> : null}
+      {presets.error ? <ErrorNote error={presets.error} /> : null}
+      {/* 坏掉的预设文件是「提示」不是「错误」，所以保留自己的样式；
+          文案仍按码取，跟错误走同一张表。 */}
       {presets.data?.warnings?.map((warning) => (
-        <p className={styles.warning} key={warning}>
-          {warning}
+        <p className={styles.warning} key={warning.code}>
+          {has(`error.${warning.code}`)
+            ? t(`error.${warning.code}`, warning.params)
+            : warning.message}
         </p>
       ))}
       {note ? <p className={styles.note}>{note}</p> : null}

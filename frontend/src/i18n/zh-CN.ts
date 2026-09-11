@@ -7,6 +7,9 @@
  * 注意这里只放**界面自己的**文案。ffmpeg 报告的内容（能力清单、`-h` 原文、
  * 任务日志、错误输出）是它自己的英文事实，不进这张表——翻译它们等于替
  * ffmpeg 说话，而且它本来也没有中文输出。
+ *
+ * 末尾一段 `error.*` 是后端的错误码（见 internal/apierr）：服务器只报码与
+ * 参数，用哪种语言说由这里决定。
  */
 export const zhCN = {
   /* -------------------------------------------------------------- 外壳 */
@@ -309,4 +312,86 @@ export const zhCN = {
   'workspace.probe.noStreams.hint': '文件可能不是媒体，或者 ffprobe 无法识别。',
   'workspace.probe.stream.unknownType': '流',
   'workspace.probe.stream.channels': '{count} 声道',
+
+  /* ------------------------------------------------------------ 服务器错误 */
+  // key 是后端的错误码（见 internal/apierr）：服务器只报码与参数，用哪种
+  // 语言说由这里决定。表里没有的码会退回响应里的中文原文，因此后端新增码
+  // 不会让界面变成空白。
+  'error.path.outside_roots': '路径不在允许的媒体目录中',
+  'error.path.unresolved': '无法解析参数里的路径：{path}',
+  'error.arg.path_outside_roots': '参数里的路径不在允许的媒体目录中：{path}',
+
+  'error.dir.empty_list': '没有需要创建的目录',
+  'error.dir.too_many': '一次最多创建 {max} 个目录',
+  'error.dir.not_absolute': '目录必须是绝对路径：{path}',
+  'error.dir.outside_roots': '目录不在允许的媒体目录中：{path}',
+  'error.dir.name_taken': '同名文件已存在，无法作为目录：{path}',
+  'error.dir.create_failed': '创建目录 {path} 失败：{cause}',
+
+  'error.scan.path_missing': '缺少扫描目录',
+  'error.scan.unavailable': '扫描目录不可用：{cause}',
+  'error.scan.not_a_directory': '扫描目录必须是一个目录',
+
+  'error.job.not_found': '任务不存在',
+  'error.job.input_missing': '缺少输入路径',
+  'error.job.output_missing': '缺少输出路径',
+  'error.job.input_outside_roots': '输入路径不在允许的媒体目录中',
+  'error.job.output_outside_roots': '输出路径不在允许的媒体目录中',
+  'error.job.too_many_args': '参数过多',
+  'error.job.arg_too_long': '单个参数过长',
+  'error.job.arg_invalid_chars': '参数包含非法字符',
+  'error.job.input_unreadable': '输入不可访问：{cause}',
+  'error.job.input_is_dir': '输入是目录',
+  'error.job.output_dir_unusable': '输出目录不可用：{dir}（{cause}）',
+  'error.job.ffmpeg_failed': 'ffmpeg 退出：{cause}',
+  'error.job.stream_unsupported': '当前连接不支持流式输出',
+  'error.job.queue_closed': '队列已关闭',
+  'error.job.id_duplicate': '任务 ID 重复：{id}',
+  'error.job.finished': '任务已结束（{status}）',
+  'error.job.not_finished': '任务尚未结束',
+  'error.job.still_queued': '任务仍在队列中，请先取消',
+  'error.job.internal': '任务执行器内部错误：{cause}',
+  'error.job.cancelled': '已取消',
+
+  'error.body.invalid_json': '请求体不是合法 JSON：{cause}',
+
+  'error.preset.dir_unavailable': '预设目录不可用：未能确定用户配置目录',
+  'error.preset.not_found': '预设不存在',
+  'error.preset.name_empty': '预设名不能为空',
+  'error.preset.name_not_utf8': '预设名不是合法的 UTF-8',
+  'error.preset.name_too_long': '预设名不能超过 {max} 个字符',
+  'error.preset.name_leading_dot': '预设名不能以点开头',
+  'error.preset.name_control_char': '预设名不能包含控制字符',
+  'error.preset.name_forbidden': '预设名不能包含 {char}',
+  'error.preset.name_trailing_space': '预设名结尾不能是空格',
+  'error.preset.recipe_invalid': '配方必须是合法的 JSON 对象',
+  'error.preset.recipe_empty': '配方不能为空',
+  'error.preset.recipe_too_large': '配方不能超过 {max} 字节',
+  'error.preset.file_invalid_json': '预设文件不是合法 JSON：{cause}',
+  'error.preset.read_failed': '无法读取预设 {name}：{cause}',
+  'error.preset.write_failed': '无法写入预设 {name}：{cause}',
+  'error.preset.remove_failed': '无法删除预设 {name}：{cause}',
+  'error.preset.dir_create_failed': '无法创建预设目录 {dir}：{cause}',
+  'error.preset.dir_read_failed': '无法读取预设目录 {dir}：{cause}',
+  'error.preset.item_unreadable': '无法读取 {name}：{cause}',
+  'error.preset.item_not_usable': '{name} 不是可用的预设：{cause}',
+
+  'error.ffmpeg.version_failed': '执行 {ffmpeg} -version 失败：{cause}',
+  'error.ffmpeg.target_missing': '缺少查询目标',
+  'error.ffmpeg.target_unsupported': '不支持的查询目标：{target}',
+  'error.ffmpeg.name_missing': '缺少组件名',
+  'error.ffmpeg.name_too_long': '组件名过长',
+  'error.ffmpeg.probe_parse_failed': '解析 ffprobe 输出失败：{cause}',
+  'error.ffmpeg.timeout': 'ffmpeg 查询超过 {timeout} 仍未返回',
+  'error.ffmpeg.quote_unclosed': '引号没有闭合',
+  'error.ffmpeg.level_unsupported': '不支持的详略级别：{level}（可用：空、long、full）',
+  'error.ffmpeg.ext_source_unsupported': '不支持的扩展名来源：{target}（可用：demuxer、muxer）',
+
+  'error.config.invalid_json': '配置文件 {path} 不是合法 JSON（{cause}）：本次忽略该文件，环境变量与默认值照常生效，文件未被改动',
+  'error.config.read_failed': '读取配置文件 {path} 失败：{cause}',
+  'error.config.write_failed': '无法写入配置文件 {path}：{cause}',
+  'error.config.unavailable': '配置目录不可用（{cause}）：本次只用环境变量与默认值，配置文件与预设都不可用',
+  'error.config.env_not_integer': '环境变量 {name}={value} 不是正整数，沿用 {fallback}',
+  'error.config.env_not_path': '环境变量 {name}={value} 不是可用路径：{cause}',
+  'error.config.dir_unknown': '无法确定用户配置目录：{cause}',
 } as const;

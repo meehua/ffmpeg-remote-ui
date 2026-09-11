@@ -17,15 +17,59 @@ import type {
   Snapshot,
 } from './types';
 
-/** 后端返回的错误体是 { error: string }，这里统一成一种异常。 */
+/** 后端错误体里的插值参数。 */
+export type ErrorParams = Record<string, string | number>;
+
+/**
+ * 后端返回的错误体是 `{ error, code, params }`。
+ *
+ * `error` 是成句的中文原文，`code`／`params` 让界面用当前语言重述同一条错误。
+ * 两样都留着是有意的：码是主路径，原文是界面还没备好对应文案时的兜底
+ * （老接口、以及内部错误都不会有码）。
+ */
 export class ApiError extends Error {
   readonly status: number;
+  /** 稳定的错误码；响应里没有时为 null。 */
+  readonly code: string | null;
+  readonly params: ErrorParams;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code: string | null, params: ErrorParams) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.params = params;
   }
+}
+
+/** 取出错误体里的三个字段；形状不对时全部当缺席。 */
+function readErrorBody(payload: unknown): { error: unknown; code: unknown; params: unknown } {
+  if (!payload || typeof payload !== 'object') {
+    return { error: undefined, code: undefined, params: undefined };
+  }
+  const body = payload as Record<string, unknown>;
+  return { error: body.error, code: body.code, params: body.params };
+}
+
+/**
+ * 只保留能安全插值的参数。
+ *
+ * 界面的插值只认字符串与数字（见 i18n），所以嵌套对象在这里就转成文本——留个
+ * `[object Object]` 很丑，但比渲染时才发现类型不对要好。
+ */
+function readParams(raw: unknown): ErrorParams {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+  const out: ErrorParams = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string' || typeof value === 'number') {
+      out[key] = value;
+    } else if (value !== undefined && value !== null) {
+      out[key] = String(value);
+    }
+  }
+  return out;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -42,11 +86,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
+    const body = readErrorBody(payload);
     const message =
-      payload && typeof payload === 'object' && 'error' in payload
-        ? String((payload as { error: unknown }).error)
-        : `${response.status} ${response.statusText}`;
-    throw new ApiError(message, response.status);
+      body.error !== undefined ? String(body.error) : `${response.status} ${response.statusText}`;
+    const code = typeof body.code === 'string' ? body.code : null;
+    throw new ApiError(message, response.status, code, readParams(body.params));
   }
   return payload as T;
 }

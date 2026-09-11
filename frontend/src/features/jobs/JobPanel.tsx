@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import type { Job, JobStatus, LogLine } from '../../api/types';
 import { Button, ButtonRow } from '../../components/Controls';
 import { Badge, CopyButton, EmptyState, ErrorNote, ProgressBar } from '../../components/Display';
+import { toError } from '../../hooks/useAsync';
 import type { MessageKey } from '../../i18n';
 import { useI18n } from '../../i18n/LocaleProvider';
 import { baseName, formatBytes } from '../../utils/format';
@@ -35,7 +36,7 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
   const { t, has } = useI18n();
   const [openId, setOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
   const act = async (id: string, task: () => Promise<unknown>) => {
     setBusyId(id);
@@ -43,7 +44,7 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
     try {
       await task();
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(toError(cause));
     } finally {
       setBusyId(null);
     }
@@ -55,7 +56,7 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
 
   return (
     <div className={styles.list}>
-      {error ? <ErrorNote>{error}</ErrorNote> : null}
+      {error ? <ErrorNote error={error} /> : null}
 
       {jobs.map((job) => {
         const lines = logs[job.id] ?? [];
@@ -112,7 +113,13 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
               {job.command}
             </p>
 
-            {job.error ? <ErrorNote>{job.error}</ErrorNote> : null}
+            {job.error ? (
+              <ErrorNote
+                code={job.errorCode}
+                params={job.errorParams}
+                fallback={job.error}
+              />
+            ) : null}
 
             <ButtonRow>
               {active ? (

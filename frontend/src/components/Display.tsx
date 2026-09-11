@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 
+import { ApiError } from '../api/client';
 import { useI18n } from '../i18n/LocaleProvider';
+import type { Params } from '../i18n/types';
 import { cx } from '../utils/format';
 import { Button } from './Controls';
 import styles from './Display.module.css';
@@ -64,11 +66,57 @@ export function EmptyState({ title, hint, action }: EmptyStateProps) {
   );
 }
 
-/** 错误提示；用 alert 角色让读屏器立刻播报。 */
-export function ErrorNote({ children }: { children: ReactNode }) {
+interface ErrorNoteProps {
+  /** 一个 Error（多半来自 useAsync/useAction）；带码时按当前语言渲染。 */
+  error?: Error | null;
+  /** 裸的码与参数：事件流推来的任务失败、以及「200 但带错误」的响应走这条路。 */
+  code?: string | null;
+  params?: Params;
+  /** 没有可用文案时显示的原文。 */
+  fallback?: string | null;
+  /**
+   * 直接给一句话，或者把一个 Error 塞进来。
+   *
+   * 带上 Error 是有意的：`{x.error}` 这种写法到处都是，而 React 渲染不了
+   * Error 对象——与其让每个调用点都记得换成 `error={x.error}`，不如在这里
+   * 一次接住，顺带拿到它的码。
+   */
+  children?: ReactNode | Error;
+}
+
+/**
+ * 错误提示；用 alert 角色让读屏器立刻播报。
+ *
+ * 「说哪句话」在这里决定，而不是散在各个调用点：后端给的是码，语言是用户
+ * 选的，把这两件事凑在一起的地方越少，漏翻一处就越容易看出来。
+ *
+ * 三种写法都收：`error={err}`、把 Error 直接写在 children 里（`{x.error}` 这种
+ * 老写法很顺手，而 React 自己渲染不了 Error 对象，所以必须在这里接住），
+ * 以及给不了码时直接给一句原文。
+ */
+export function ErrorNote({ error, code, params, fallback, children }: ErrorNoteProps) {
+  const { t, has } = useI18n();
+
+  const source = error ?? (children instanceof Error ? children : null);
+  const resolvedCode = source instanceof ApiError ? source.code : (code ?? null);
+  const resolvedParams = source instanceof ApiError ? source.params : params;
+  const raw =
+    fallback ??
+    source?.message ??
+    (children instanceof Error ? null : children) ??
+    null;
+
+  const text =
+    resolvedCode !== null && has(`error.${resolvedCode}`)
+      ? t(`error.${resolvedCode}`, resolvedParams)
+      : raw;
+
+  if (text === null || text === undefined) {
+    return null;
+  }
   return (
     <p className={styles.error} role="alert">
-      {children}
+      {text}
     </p>
   );
 }

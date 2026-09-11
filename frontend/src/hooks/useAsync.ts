@@ -2,13 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface AsyncResource<T> {
   data: T | null;
-  error: string | null;
+  /**
+   * 保留原始错误对象，而不是提前拍平成字符串。
+   *
+   * 后端把同一条错误拆成了「码 + 参数 + 中文原文」，界面要按当前语言重述它；
+   * 一旦在这里转成字符串，语言就固定在出错那一刻了。
+   */
+  error: Error | null;
   loading: boolean;
   reload: () => void;
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** 把任意抛出物收拢成 Error，便于界面统一渲染。 */
+export function toError(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
 }
 
 /**
@@ -19,7 +26,7 @@ function messageOf(error: unknown): string {
  */
 export function useAsync<T>(loader: () => Promise<T>, deps: readonly unknown[] = []): AsyncResource<T> {
   const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
 
@@ -38,7 +45,7 @@ export function useAsync<T>(loader: () => Promise<T>, deps: readonly unknown[] =
       })
       .catch((cause: unknown) => {
         if (!alive) return;
-        setError(messageOf(cause));
+        setError(toError(cause));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -55,7 +62,7 @@ export function useAsync<T>(loader: () => Promise<T>, deps: readonly unknown[] =
 
 export interface ActionState {
   pending: boolean;
-  error: string | null;
+  error: Error | null;
   /** 执行动作；返回是否成功，便于调用方决定后续步骤。 */
   run: (task: () => Promise<unknown>) => Promise<boolean>;
   clearError: () => void;
@@ -64,7 +71,7 @@ export interface ActionState {
 /** 提交类动作的通用状态：进行中、错误、以及是否成功。 */
 export function useAction(): ActionState {
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
   const run = useCallback(async (task: () => Promise<unknown>) => {
     setPending(true);
@@ -73,7 +80,7 @@ export function useAction(): ActionState {
       await task();
       return true;
     } catch (cause: unknown) {
-      setError(messageOf(cause));
+      setError(toError(cause));
       return false;
     } finally {
       setPending(false);
