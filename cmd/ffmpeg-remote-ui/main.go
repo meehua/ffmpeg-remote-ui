@@ -10,12 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/meehua/ffmpeg-remote-ui/internal/config"
 	"github.com/meehua/ffmpeg-remote-ui/internal/ffmpeg"
+	"github.com/meehua/ffmpeg-remote-ui/internal/preset"
 	"github.com/meehua/ffmpeg-remote-ui/internal/server"
 )
 
@@ -32,21 +33,26 @@ func main() {
 }
 
 func run() error {
-	// 默认让系统分配随机端口，首次启动不需要任何配置。
-	addr := env("FFMPEG_REMOTE_UI_HTTP_ADDR", "127.0.0.1:0")
+	// 运行时设置按「环境变量 > 配置文件 > 内置默认值」解析；
+	// 配置文件不存在时会被就地生成，因此首次启动依然零配置。
+	cfg, info := config.Load()
 
-	// FFmpeg/FFprobe 默认通过 PATH 自动发现，环境变量只作为覆盖。
-	service := ffmpeg.NewService(
-		env("FFMPEG_REMOTE_UI_FFMPEG_PATH", "ffmpeg"),
-		env("FFMPEG_REMOTE_UI_FFPROBE_PATH", "ffprobe"),
-	)
+	// FFmpeg/FFprobe 默认通过 PATH 自动发现，配置只作为覆盖。
+	service := ffmpeg.NewService(cfg.FFmpegPath, cfg.FFprobePath)
+
+	presets, err := openPresets(info)
+	if err != nil {
+		log.Printf("警告   : %v，预设功能本次不可用", err)
+	}
 
 	handler := server.New(service, webFS, server.Options{
-		MediaRoots:    strings.TrimSpace(os.Getenv("FFMPEG_REMOTE_UI_MEDIA_ROOTS")),
-		MaxConcurrent: envInt("FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS", 1),
+		MediaRoots:    cfg.MediaRoots,
+		MaxConcurrent: cfg.MaxConcurrentJobs,
+		Config:        info,
+		Presets:       presets,
 	})
 
-	listener, actualAddr, err := server.Listen(addr)
+	listener, actualAddr, err := server.Listen(cfg.HTTPAddr)
 	if err != nil {
 		return err
 	}
@@ -61,20 +67,35 @@ func run() error {
 
 	snap := service.Snapshot()
 	log.Printf("FFmpeg Remote UI 已启动: http://%s", actualAddr)
-	log.Printf("FFmpeg : %s", service.FFmpegPath())
-	log.Printf("FFprobe: %s", service.FFprobePath())
-	log.Printf("并发上限: %d 个任务", handler.Queue().Limit())
+	log.Printf("FFmpeg : %s（%s）", service.FFmpegPath(), sourceLabel(info, config.FieldFFmpegPath))
+	log.Printf("FFprobe: %s（%s）", service.FFprobePath(), sourceLabel(info, config.FieldFFprobePath))
+	log.Printf("并发上限: %d 个任务（%s）", handler.Queue().Limit(), sourceLabel(info, config.FieldMaxJobs))
 	// 路径限制不是安全边界，把它的真实范围说清楚，免得被当成隔离手段。
 	if roots := handler.MediaRoots(); len(roots) > 0 {
-		log.Printf("媒体目录: %s（接口只接受这些目录内的路径）", strings.Join(roots, ", "))
+		log.Printf("媒体目录: %s（%s；接口只接受这些目录内的路径）",
+			strings.Join(roots, ", "), sourceLabel(info, config.FieldMediaRoots))
 	} else {
-		log.Printf("媒体目录: 未限制（FFMPEG_REMOTE_UI_MEDIA_ROOTS 为空，接口可访问文件系统任意路径）")
+		log.Printf("媒体目录: 未限制（%s，接口可访问文件系统任意路径）",
+			sourceLabel(info, config.FieldMediaRoots))
+	}
+	if info.Path != "" {
+		log.Printf("配置   : %s", info.Path)
+	}
+	for _, warning := range info.Warnings {
+		log.Printf("警告   : %s", warning)
+	}
+	// 首次运行会把生效设置写成初始配置：这一步必须让用户知道，
+	// 否则「配置从哪来」和「该去哪改」都会变成谜。
+	if info.Created {
+		log.Print("提示   : 首次运行，已按本次生效的设置生成上面的配置文件；")
+		log.Print("         以后直接改这个文件即可，需要临时覆盖时再用环境变量（环境变量优先级更高）")
 	}
 	if snap.Version != "" {
 		log.Printf("版本   : %s", snap.Version)
 	}
 	if len(snap.Encoders) == 0 {
-		log.Printf("提示   : 未能读取到编码器列表，请确认 FFMPEG_REMOTE_UI_FFMPEG_PATH 指向可执行的 ffmpeg")
+		log.Printf("提示   : 未能读取到编码器列表，请确认 FFmpeg 路径指向可执行的 ffmpeg（当前 %s）",
+			service.FFmpegPath())
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -108,22 +129,29 @@ func run() error {
 	return nil
 }
 
-func env(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
+// openPresets 准备预设目录。拿不到目录时返回错误，预设功能被标记为不可用，
+// 其余功能照常工作。
+func openPresets(info config.Info) (*preset.Store, error) {
+	if info.PresetsDir == "" {
+		return nil, errors.New("未能确定用户配置目录")
 	}
-	return fallback
+	store, err := preset.NewStore(info.PresetsDir)
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
-func envInt(key string, fallback int) int {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
+// sourceLabel 把「这个值来自哪里」翻译成启动日志里的一句话。
+func sourceLabel(info config.Info, field string) string {
+	switch info.Sources[field] {
+	case config.SourceEnv:
+		return "来自环境变量"
+	case config.SourceFile:
+		return "来自配置文件"
+	case config.SourceDefault:
+		return "默认值"
+	default:
+		return "来源未知"
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
-		log.Printf("环境变量 %s=%q 不是正整数，改用 %d", key, v, fallback)
-		return fallback
-	}
-	return n
 }

@@ -24,24 +24,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meehua/ffmpeg-remote-ui/internal/config"
 	"github.com/meehua/ffmpeg-remote-ui/internal/ffmpeg"
 	"github.com/meehua/ffmpeg-remote-ui/internal/hardware"
+	"github.com/meehua/ffmpeg-remote-ui/internal/preset"
 	"github.com/meehua/ffmpeg-remote-ui/internal/queue"
 )
 
 // maxBodyBytes 限制请求体大小；一次添加任务的参数远小于这个数字。
 const maxBodyBytes = 1 << 20
 
-// Options 是服务端可调项，全部来自环境变量。
+// Options 是服务端可调项：路径与并发来自运行时设置（环境变量 + 配置文件），
+// Config 与 Presets 只影响接口的展示与预设读写。
 type Options struct {
-	MediaRoots    string // 用 os.PathListSeparator 分隔；为空表示不限制
-	MaxConcurrent int    // 同时运行的 ffmpeg 进程数
+	MediaRoots    []string // 已归一化的绝对路径；为空表示不限制
+	MaxConcurrent int      // 同时运行的 ffmpeg 进程数
+	Config        config.Info
+	Presets       *preset.Store // 为 nil 表示预设目录不可用
 }
 
 type Server struct {
 	ff         *ffmpeg.Service
 	queue      *queue.Queue
 	mediaRoots []string
+	config     config.Info
+	presets    *preset.Store
 	web        embed.FS
 	mux        *http.ServeMux
 
@@ -54,7 +61,9 @@ func New(ff *ffmpeg.Service, web embed.FS, opts Options) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		ff:         ff,
-		mediaRoots: splitRoots(opts.MediaRoots),
+		mediaRoots: opts.MediaRoots,
+		config:     opts.Config,
+		presets:    opts.Presets,
 		web:        web,
 		ctx:        ctx,
 		cancel:     cancel,
@@ -86,11 +95,21 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/ffmpeg", s.ffmpegInfo)
 	mux.HandleFunc("GET /api/ffmpeg/help", s.ffmpegHelp)
+	mux.HandleFunc("GET /api/ffmpeg/cli", s.ffmpegCli)
+	mux.HandleFunc("GET /api/ffmpeg/extensions", s.ffmpegExtensions)
 	mux.HandleFunc("POST /api/ffmpeg/refresh", s.ffmpegRefresh)
 	mux.HandleFunc("GET /api/probe", s.probe)
 	mux.HandleFunc("GET /api/files", s.files)
+	mux.HandleFunc("GET /api/files/scan", s.scanFiles)
+	mux.HandleFunc("POST /api/dirs", s.makeDirs)
 	mux.HandleFunc("GET /api/hardware", s.hardware)
 	mux.HandleFunc("POST /api/command", s.command)
+
+	mux.HandleFunc("GET /api/config", s.configInfo)
+	mux.HandleFunc("GET /api/presets", s.presetsList)
+	mux.HandleFunc("GET /api/presets/{name}", s.presetGet)
+	mux.HandleFunc("PUT /api/presets/{name}", s.presetSave)
+	mux.HandleFunc("DELETE /api/presets/{name}", s.presetDelete)
 
 	mux.HandleFunc("GET /api/jobs", s.jobsList)
 	mux.HandleFunc("POST /api/jobs", s.jobsCreate)
@@ -666,21 +685,6 @@ func resolvePath(p string) string {
 		return p
 	}
 	return filepath.Join(resolvePath(dir), base)
-}
-
-func splitRoots(v string) []string {
-	var out []string
-	for _, x := range strings.Split(v, string(os.PathListSeparator)) {
-		x = strings.TrimSpace(x)
-		if x == "" {
-			continue
-		}
-		if abs, err := filepath.Abs(x); err == nil {
-			x = abs
-		}
-		out = append(out, filepath.Clean(x))
-	}
-	return out
 }
 
 func containsArg(args []string, want string) bool {
