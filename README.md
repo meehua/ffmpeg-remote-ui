@@ -28,9 +28,30 @@ comes down to these:
 - **Single binary.** The frontend build output is embedded with `go:embed`, so at
   runtime you need nothing but the program itself plus FFmpeg/FFprobe on the
   server.
-- **No configuration by default.** It listens on `127.0.0.1:0` (a system-assigned
-  port) and discovers FFmpeg/FFprobe from `PATH`; environment variables only matter
-  when you want to override something.
+- **No configuration required.** It listens on `127.0.0.1:0` (a system-assigned
+  port) and discovers FFmpeg/FFprobe from `PATH`, so a first run needs nothing at
+  all. The settings behind that behaviour live in a JSON file in the user config
+  directory, which the first run writes for you; environment variables still win
+  when you want to override something for a single run. See [Run](#run).
+- **User state is plain JSON.** Both `config.json` and the presets under
+  `presets/` are ordinary files you can read and edit by hand. Everything that
+  matters is written atomically, so an interrupted write never leaves half a
+  file behind.
+- **The UI mirrors ffmpeg's own command line.** `ffmpeg -h` already groups its
+  options by where they belong (`Global options`, `Per-file options (input-only)`,
+  `Per-file options (output-only)`, `Per-stream options`, `Video/Audio/Subtitle/
+  Data options`). The panel is rendered from exactly that grouping — same
+  section names, same option names, same placeholders — so `-ss`, `-t`,
+  `-metadata`, the four stream kinds and per-stream options like `-filter:a` are
+  controls instead of hand-typed arguments, and a newer FFmpeg shows up in the UI
+  without a code change. Where ffmpeg's grouping and its actual position
+  constraint disagree (it files `-hwaccel` under `Advanced Video options`, yet
+  rejects it on the output side), the option carries an editable position rather
+  than the program hard-coding an exception.
+- **One option appears once.** The model is a name → value map, so an option that
+  ffmpeg expects to be repeated — `-map 0:v:0? -map 0:a:0?` is the common case —
+  cannot be expressed as a control yet; put those in the extra-args field, which
+  is passed through verbatim.
 
 ## Layout
 
@@ -79,10 +100,39 @@ frontend            React frontend (no UI component library, no CSS framework)
   area is a card stacked vertically; in landscape and wide enough they become
   side-by-side columns with sticky headers. Both forms are the same DOM, switched
   purely by orientation media queries.
-- Two modes for building the command line: a form generated from the server's real
-  capabilities, and hand-written argv. `shellQuote` / `SplitArgs` follow the same
+- Two modes for building the command line: a form whose structure and options both
+  come from ffmpeg's own `-h` output (see "The UI mirrors ffmpeg's own command
+  line" above), and hand-written argv. `shellQuote` / `SplitArgs` follow the same
   rules on both frontend and backend, so the command you preview is the one that
   runs.
+- **The form keeps what you typed.** Every field in the workspace and batch views
+  is stored in `localStorage` through one hook, so switching sections or reloading
+  the page no longer wipes a half-filled command. Stored data is normalised on
+  read: an old or corrupted entry falls back to the defaults instead of breaking
+  the form.
+- **A preset holds the whole setup.** A named recipe can be saved, loaded and
+  deleted from either view and is stored as JSON in the user config directory, so
+  it is shared by every browser you use. What gets saved is the entire transcode
+  setup — per-stream encoders and their options, the command-line options, extra
+  args — so a combination you tuned once can be reused as a whole instead of
+  being re-entered field by field. The recipe is versioned, migrated automatically
+  from the previous shape, and the backend never looks inside it.
+- **"Keep the original stream" means `copy`, not an empty field.** The first entry
+  of each stream's encoder list is "not set", which emits *no* `-c:<stream>` at
+  all — ffmpeg then re-encodes with the output format's default encoder. To really
+  keep a stream as it is, pick `copy` (ffmpeg's wording: 'copy' to copy stream
+  without reencoding).
+- **Extension candidates come from ffmpeg.** Both the batch scan filter and the
+  output extension draw their suggestions from the `Common extensions` ffmpeg
+  itself declares in its `demuxer` / `muxer` help — input side and output side
+  each from their own direction, with no "common formats" table anywhere in the
+  code. "All" only ticks what the current filter shows.
+- **Batch work can mirror a directory tree.** The batch view scans a directory
+  recursively (the extension allow-list comes from that same list) and fills the
+  list; when "restore the original directory structure" is on, each output keeps
+  its path relative to the scanned root, and the output directories are created
+  before the jobs are submitted — FFmpeg itself never creates them. Extensions
+  stay the job of the naming settings, not of the structure.
 - **Hardware devices can be chosen explicitly**: the device type comes from
   `ffmpeg -init_hw_device list` and the device node from `/dev/dri`. On machines
   with more than one GPU (integrated plus discrete, say) FFmpeg picks one on its
@@ -118,10 +168,14 @@ Frontend dependencies (all current stable):
 ./ffmpeg-remote-ui
 ```
 
-The terminal prints the actual listening address and the effective media roots.
-Every environment variable has a sensible default, and they all share the
-`FFMPEG_REMOTE_UI_` prefix to avoid colliding with other services on the same host
-(especially generic names such as `HTTP_ADDR`):
+The terminal prints the actual listening address, the effective media roots, and
+where each setting came from.
+
+Settings are resolved in three layers — **environment variables > `config.json` >
+built-in defaults**. An environment variable describes *this run*; the file
+describes *this machine*. They all share the `FFMPEG_REMOTE_UI_` prefix to avoid
+colliding with other services on the same host (especially generic names such as
+`HTTP_ADDR`):
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -130,6 +184,48 @@ Every environment variable has a sensible default, and they all share the
 | `FFMPEG_REMOTE_UI_FFMPEG_PATH` | `ffmpeg` | Resolved from `PATH` |
 | `FFMPEG_REMOTE_UI_FFPROBE_PATH` | `ffprobe` | Resolved from `PATH` |
 | `FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS` | `1` | Number of concurrent ffmpeg processes |
+| `FFMPEG_REMOTE_UI_CONFIG_DIR` | `$XDG_CONFIG_HOME/ffmpeg-remote-ui` | Where `config.json` and `presets/` live |
+
+### The config file
+
+On the first run there is no `config.json` yet, so the program writes one holding
+the settings that actually took effect — and says so in the terminal and in the
+UI. After that you edit that file instead of exporting variables on every boot:
+
+```json
+{
+  "httpAddr": "127.0.0.1:0",
+  "mediaRoots": [],
+  "ffmpegPath": "ffmpeg",
+  "ffprobePath": "ffprobe",
+  "maxConcurrentJobs": 1
+}
+```
+
+The file is written atomically and is **never overwritten afterwards** — not even
+when it fails to parse, since that usually means you are in the middle of editing
+it. A broken file only produces a warning; the environment and the defaults still
+apply. The header area of the UI repeats the effective settings and names the
+layer each value came from, so "which one is winning?" never needs guessing.
+
+### Presets
+
+The recipe you assemble in the form — encoder, its options, hardware device,
+extra args, plus the batch naming options — can be saved as a named preset.
+Presets are plain JSON files next to `config.json`, written atomically and
+editable by hand:
+
+```
+~/.config/ffmpeg-remote-ui/
+├── config.json
+└── presets/
+    └── x265 slow.json
+```
+
+A preset carries a `version`, and the frontend parses it leniently: missing
+fields fall back to defaults and unknown ones are ignored, so an old preset keeps
+working after the form gains a field. The backend treats the recipe as opaque
+JSON, which is why adding a field to the form never requires a backend change.
 
 For example:
 
@@ -226,10 +322,17 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # start the backend separately on
 | GET | `/api/ffmpeg` | FFmpeg capability snapshot |
 | POST | `/api/ffmpeg/refresh` | Re-query capabilities (after changing FFmpeg versions) |
 | GET | `/api/ffmpeg/help?target=&name=` | Structured `ffmpeg -h` result plus raw output |
+| GET | `/api/ffmpeg/cli?level=` | ffmpeg's own command-line topology: sections → options, with the scope and media type read out of each section title |
+| GET | `/api/ffmpeg/extensions?target=` | File extensions ffmpeg declares for `demuxer` (input side) or `muxer` (output side) |
 | GET | `/api/probe?path=` | Server-side ffprobe |
 | GET | `/api/files?path=` | Directory listing (size, mtime, extension) |
+| GET | `/api/files/scan?path=&ext=&limit=` | Recursive scan; `ext` is an optional comma-separated allow-list |
+| POST | `/api/dirs` | Create output directories, parents included |
 | GET | `/api/hardware` | DRM devices |
 | POST | `/api/command` | argv or free-form text → final command preview |
+| GET | `/api/config` | Effective runtime settings and the origin of each value |
+| GET | `/api/presets` | Preset directory and the list of presets |
+| GET / PUT / DELETE | `/api/presets/{name}` | Read / save (overwrite) / delete one preset |
 | GET / POST | `/api/jobs` | List jobs / enqueue one |
 | GET | `/api/jobs/{id}`, `/api/jobs/{id}/log` | A single job and its log |
 | POST | `/api/jobs/{id}/cancel`, `/api/jobs/{id}/retry` | Cancel / retry |

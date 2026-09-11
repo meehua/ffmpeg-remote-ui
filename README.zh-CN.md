@@ -22,17 +22,35 @@ GPU 与任务队列全部位于运行程序的服务器上；浏览器既不转�
   没有 ORM、没有 WebSocket 库。
 - **单一二进制。** 前端构建产物通过 `go:embed` 嵌进可执行文件，运行时只需要
   程序本身加上服务器上的 FFmpeg/FFprobe。
-- **默认不需要配置。** 默认监听 `127.0.0.1:0`（系统分配端口），FFmpeg/FFprobe
-  从 `PATH` 自动发现；只有要覆盖时才用环境变量。
+- **不需要预先配置。** 默认监听 `127.0.0.1:0`（系统分配端口），FFmpeg/FFprobe
+  从 `PATH` 自动发现，因此第一次运行什么都不用准备。这些设置在用户配置目录的
+  JSON 文件里，首次运行由程序替你写出来；想临时覆盖某一次运行，环境变量仍然优先。
+  详见[运行](#运行)。
+- **用户状态就是普通 JSON。** `config.json` 与 `presets/` 下的预设都是能直接读、
+  能手工改的文件，且一律原子写入——写到一半被打断不会留下半截文件。
+- **界面就是 ffmpeg 的命令行本身。** `ffmpeg -h` 早就把选项按位置分好了组
+  （`Global options`、`Per-file options (input-only)`、`Per-file options
+  (output-only)`、`Per-stream options`、`Video/Audio/Subtitle/Data options`）。
+  面板就照这组分节渲染：分节名、选项名、占位符全部照抄，于是 `-ss`、`-t`、
+  `-metadata`、视频/音频/字幕/数据四类流、以及 `-filter:a` 这类每流选项都是控件，
+  而不是要手敲的参数；服务器上的 FFmpeg 升级后，界面自动跟着变。只有一处例外：
+  ffmpeg 的分组和它实际的位置约束并不总一致（它把 `-hwaccel` 归在
+  `Advanced Video options`，却拒绝把它放在输出侧），这种情况下选项自带一个可改的
+  位置，而不是由程序替 ffmpeg 打补丁。
+- **一个选项只出现一次。** 模型是「选项名 → 取值」的映射，所以 ffmpeg 要求重复
+  出现的选项——最常见的就是 `-map 0:v:0? -map 0:a:0?`——暂时还不能做成控件；
+  这类写法请放进「附加参数」，那个字段是原样透传的。
 
 ## 架构
 
 ```
-cmd/ffmpeg-remote-ui  入口：环境变量、优雅关闭、嵌入式前端
+cmd/ffmpeg-remote-ui  入口：运行时设置、优雅关闭、嵌入式前端
 internal/ffmpeg     FFmpeg/FFprobe 查询与解析（能力快照、-h 结构、ffprobe）
 internal/queue      并发受限的任务队列（状态机、进度、日志、事件广播）
-internal/server     HTTP 层（路由、SSE 事件流、文件浏览、静态资源）
+internal/server     HTTP 层（路由、SSE 事件流、文件浏览、目录扫描、静态资源）
 internal/hardware   Linux DRM render node 发现（只读 sysfs，不推断能力）
+internal/config     运行时设置：环境变量 + config.json + 默认值三级合并
+internal/preset     预设存储：用户配置目录下的 JSON 文件
 frontend            React 前端（无 UI 组件库、无 CSS 框架）
 ```
 
@@ -48,6 +66,8 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   `job` 与 `log` 事件；断线由浏览器自动重连，重连后状态仍然收敛。
 - 路径校验会清理路径并解析符号链接（包括对尚不存在路径的最近存在祖先），
   避免通过链接跳出媒体根目录。
+- 目录扫描与“创建输出目录”走同一套路径校验：扫描只收普通文件、跳过隐藏项与
+  符号链接，并且可以带一份由用户给出的扩展名白名单——程序里没有内置的媒体格式表。
 
 ### 前端
 
@@ -63,9 +83,30 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   顶部被顶出视口的错位。
 - **分栏是自适应的**：竖屏（或窗口过窄）时各区域是卡片，纵向堆叠；横屏且够宽时
   变成并列分栏、标题吸顶。两种形态是同一份 DOM，只由方向媒体查询切换。
-- 参数构建器与手写 argv 双模式：前者从服务器真实能力生成表单，后者直接写
+- 参数构建器与手写 argv 双模式：参数构建器的结构与选项全部来自 ffmpeg 自己的
+  `-h` 输出（见设计要点里的「界面就是 ffmpeg 的命令行本身」），手写模式则直接写
   命令行；`shellQuote` 与 `SplitArgs` 在前端和后端是同一套规则，因此预览到的
   命令与实际执行的一致。
+- **表单填过的东西不会白填**：工作区与批处理的每个字段都经同一个 hook 存进
+  浏览器本地存档，切换功能域或刷新页面都不再清空；读回时会先归一化，旧存档或
+  坏存档退回默认值，而不是把界面弄崩。
+- **预设存的是整套设置**：一份命名配方可以在两个视图里保存、载入与删除，落在
+  用户配置目录的 JSON 文件里，因此换浏览器、换设备看到的都是同一批。存下来的
+  是整个转码设置——每路流的编码器与参数、命令行选项、附加参数——所以调好的一套
+  可以整套复用，不必在面板里重新翻一遍。配方自带版本号并被宽容解析（旧版本会
+  自动迁移），后端从不解析它的内容。
+- **「保留原流」靠的是 copy，不是留空**：每路流的编码器下拉里第一项是
+  「不设置」，它意味着**不生成** `-c:<流>`，此时 ffmpeg 会用输出格式的默认编码器
+  重新编码；要真正保留原来那一路，选 `copy`（ffmpeg 原文：'copy' to copy stream
+  without reencoding）。
+- **扩展名候选来自 ffmpeg**：批处理扫描的扩展名过滤与输出扩展名，候选都取自
+  ffmpeg 在 `demuxer` / `muxer` 帮助里写的 Common extensions——输入侧与输出侧
+  各取各的那一份，程序里没有「常见格式」这种表。「全部」只会勾选当前筛选出来的
+  那些。
+- **批处理可以还原目录结构**：批处理能递归扫描一个目录（扩展名白名单来自上面
+  那份列表）并填入列表；打开「还原原目录结构」后，每个输出按相对扫描根的路径落位，
+  输出目录会在提交前建好——FFmpeg 自己不会创建目录。扩展名始终归命名设置管，
+  与结构还原无关。
 - **硬件设备可显式指定**：设备类型取自 `ffmpeg -init_hw_device list`，设备节点取自
   `/dev/dri`；机器上有多块 GPU（例如核显 + 独显）时 FFmpeg 会自己挑一个，
   挑错就表现为「打开编码器失败」。选中后生成 `-init_hw_device <type>=hw:<node>`，
@@ -98,8 +139,11 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
 ./ffmpeg-remote-ui
 ```
 
-终端会打印实际监听地址与生效的媒体目录。环境变量都有合理默认值，并统一带
-`FFMPEG_REMOTE_UI_` 前缀，避免和同机其它服务（尤其是 `HTTP_ADDR` 这类泛名）撞车：
+终端会打印实际监听地址、生效的媒体目录，以及每个设置来自哪一层。
+
+设置按 **环境变量 > `config.json` > 内置默认值** 三级解析：环境变量描述「这一次
+运行」，配置文件描述「这台机器」。它们统一带 `FFMPEG_REMOTE_UI_` 前缀，避免和同机
+其它服务（尤其是 `HTTP_ADDR` 这类泛名）撞车：
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -108,8 +152,9 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
 | `FFMPEG_REMOTE_UI_FFMPEG_PATH` | `ffmpeg` | 从 `PATH` 查找 |
 | `FFMPEG_REMOTE_UI_FFPROBE_PATH` | `ffprobe` | 从 `PATH` 查找 |
 | `FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS` | `1` | 同时运行的 ffmpeg 进程数 |
+| `FFMPEG_REMOTE_UI_CONFIG_DIR` | `$XDG_CONFIG_HOME/ffmpeg-remote-ui` | `config.json` 与 `presets/` 所在目录 |
 
-例如：
+例如，用环境变量临时覆盖这一次运行：
 
 ```bash
 FFMPEG_REMOTE_UI_HTTP_ADDR=:8090 \
@@ -117,6 +162,42 @@ FFMPEG_REMOTE_UI_MEDIA_ROOTS=/data/media:/mnt/media \
 FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
   ./ffmpeg-remote-ui
 ```
+
+### 配置文件
+
+首次运行时还没有 `config.json`，程序会把本次真正生效的设置写成一份，并在终端与
+界面里都说明这件事。之后直接改这个文件即可，不必每次开机都导环境变量：
+
+```json
+{
+  "httpAddr": "127.0.0.1:0",
+  "mediaRoots": [],
+  "ffmpegPath": "ffmpeg",
+  "ffprobePath": "ffprobe",
+  "maxConcurrentJobs": 1
+}
+```
+
+文件是原子写入的，并且**此后绝不会被程序覆盖**——即使它已经写坏，因为那通常意味着
+你正在编辑它。文件写坏只会产生一条警告，环境变量与默认值照常生效。界面上方的
+「运行时设置」会把生效值与每个值的来源一并列出，「到底哪个生效了」不需要猜。
+
+### 预设
+
+表单里攒出来的配方（编码器及其参数、硬件设备、附加参数，加上批处理的命名选项）
+可以存成一份命名预设。预设就是 `config.json` 旁边的普通 JSON 文件，原子写入，
+也可以手工编辑：
+
+```
+~/.config/ffmpeg-remote-ui/
+├── config.json
+└── presets/
+    └── x265 慢速.json
+```
+
+预设自带 `version`，前端按宽容规则解析：缺字段用默认值补齐、多出来的字段直接忽略，
+因此表单以后加了字段，老预设照样能用。后端把配方当作不透明 JSON，所以改界面从来
+不需要动后端。
 
 ## 硬件加速
 
@@ -194,10 +275,17 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # 后端另行启动在 8090
 | GET | `/api/ffmpeg` | FFmpeg 能力快照 |
 | POST | `/api/ffmpeg/refresh` | 重新查询能力（换过 FFmpeg 版本后） |
 | GET | `/api/ffmpeg/help?target=&name=` | `ffmpeg -h` 的结构化结果 + 原始输出 |
+| GET | `/api/ffmpeg/cli?level=` | ffmpeg 自己的命令行拓扑：分节 → 选项，作用范围与媒体类型从分节标题读出 |
+| GET | `/api/ffmpeg/extensions?target=` | ffmpeg 声明的文件扩展名：`demuxer`（输入侧）或 `muxer`（输出侧） |
 | GET | `/api/probe?path=` | 服务器端 ffprobe |
 | GET | `/api/files?path=` | 目录浏览（含大小、修改时间、扩展名） |
+| GET | `/api/files/scan?path=&ext=&limit=` | 递归扫描；`ext` 是可选的逗号分隔扩展名白名单 |
+| POST | `/api/dirs` | 创建输出目录（含父目录） |
 | GET | `/api/hardware` | DRM 设备 |
 | POST | `/api/command` | argv 或手写文本 → 最终命令预览 |
+| GET | `/api/config` | 生效的运行时设置与每个值的来源 |
+| GET | `/api/presets` | 预设目录与预设列表 |
+| GET / PUT / DELETE | `/api/presets/{name}` | 读取 / 保存（覆盖）/ 删除一份预设 |
 | GET / POST | `/api/jobs` | 任务列表 / 入队 |
 | GET | `/api/jobs/{id}`、`/api/jobs/{id}/log` | 单个任务与其日志 |
 | POST | `/api/jobs/{id}/cancel`、`/api/jobs/{id}/retry` | 取消 / 重试 |
@@ -216,6 +304,8 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # 后端另行启动在 8090
 - 它约束 `input`/`output` 字段，并对 `args` 里出现的绝对路径与显式相对路径
   （`./x`、`../x`）做同样的校验，所以 `-i /etc/shadow`、`-vf subtitles=../x`
   这类写法会被拒绝。
+- 目录扫描与创建目录同样受它约束：扫描只能扫允许范围内的目录，创建目录只能建在
+  允许范围内。
 - 但它挡不住 **concat 列表文件**里写的路径，也挡不住不带任何前缀的相对路径
   （那取决于进程的工作目录）；接口本身也不区分调用者身份。
 
