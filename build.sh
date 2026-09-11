@@ -37,6 +37,26 @@ cp -R frontend/dist/. cmd/ffmpeg-remote-ui/web/
 
 go vet ./...
 go test ./...
-go build -trimpath -ldflags='-s -w' -o ffmpeg-remote-ui ./cmd/ffmpeg-remote-ui
+
+# 版本信息在链接期注入；不在 git 仓库里（或还没有 tag）时退回 dev。
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  build_version=$(git describe --tags --dirty 2>/dev/null || echo dev)
+  build_commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+
+  # HEAD 之后还有没提交的改动时把哈希标成 -dirty：不然这个哈希会让人以为
+  # 二进制里的代码就是那个提交里的代码，而实际构建还夹带了工作区的改动。
+  if [ "$build_commit" != unknown ] && [ -n "$(git status --porcelain)" ]; then
+    build_commit="${build_commit}-dirty"
+  fi
+else
+  build_version=dev
+  build_commit=unknown
+fi
+build_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+go build -trimpath \
+  -ldflags="-s -w -X main.version=$build_version -X main.commit=$build_commit -X main.buildDate=$build_date" \
+  -o ffmpeg-remote-ui ./cmd/ffmpeg-remote-ui
 
 printf '\n构建完成：./ffmpeg-remote-ui（直接运行即可，终端会打印监听地址）\n'
+printf '版本：%s\n' "$(./ffmpeg-remote-ui --version)"

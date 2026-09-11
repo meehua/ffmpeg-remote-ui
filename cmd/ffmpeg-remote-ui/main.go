@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -26,10 +27,48 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// 构建信息在链接期由 -ldflags -X 注入（见 build.sh 与 .github/workflows/release.yml）：
+// -X main.version=<tag>、-X main.commit=<short sha>、-X main.buildDate=<RFC3339>。
+// 不带这些选项直接 go build / go run 时保留下面的默认值，程序照常工作。
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
+	// --version 给部署脚本用：只输出一行，不启动服务。
+	if isVersionRequest(os.Args[1:]) {
+		fmt.Println(buildInfo())
+		return
+	}
+
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// isVersionRequest 判断这次调用是不是只想问版本号。
+func isVersionRequest(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	return args[0] == "-version" || args[0] == "--version"
+}
+
+// buildInfo 把三项构建信息拼成一行；没注入的项直接省略，不留下空占位。
+func buildInfo() string {
+	extra := make([]string, 0, 2)
+	if commit != "" && commit != "unknown" {
+		extra = append(extra, "commit "+commit)
+	}
+	if buildDate != "" && buildDate != "unknown" {
+		extra = append(extra, "构建于 "+buildDate)
+	}
+	if len(extra) == 0 {
+		return version
+	}
+	return version + "（" + strings.Join(extra, "，") + "）"
 }
 
 func run() error {
@@ -67,6 +106,8 @@ func run() error {
 
 	snap := service.Snapshot()
 	log.Printf("FFmpeg Remote UI 已启动: http://%s", actualAddr)
+	// 出问题时第一件事往往是确认「跑的是哪个构建」，所以启动就说清楚。
+	log.Printf("构建   : %s", buildInfo())
 	log.Printf("FFmpeg : %s（%s）", service.FFmpegPath(), sourceLabel(info, config.FieldFFmpegPath))
 	log.Printf("FFprobe: %s（%s）", service.FFprobePath(), sourceLabel(info, config.FieldFFprobePath))
 	log.Printf("并发上限: %d 个任务（%s）", handler.Queue().Limit(), sourceLabel(info, config.FieldMaxJobs))

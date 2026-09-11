@@ -1,0 +1,187 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      # React 构建产物会通过 go:embed 打进二进制
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 根据 version.json 自动计算版本
+      - name: Calculate version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -f version.json ]; then
+            echo "错误：找不到 version.json"
+            exit 1
+          fi
+
+          MAJOR=$(jq -r '.major' version.json)
+
+          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then
+            echo "错误：major 必须是整数"
+            exit 1
+          fi
+
+          # 还没有任何 v1.N release 时 grep 返回 1；|| true 让这一段在
+          # 有人给 step 加上 shell: bash（-eo pipefail）时也能走到下面的 MINOR=0。
+          LAST=$(
+            gh release list \
+              --limit 1000 \
+              --json tagName \
+              --jq '.[].tagName' |
+            grep -E "^v${MAJOR}\.[0-9]+$" |
+            sed "s/^v${MAJOR}\.//" |
+            sort -n |
+            tail -1 || true
+          )
+
+          if [ -z "$LAST" ]; then
+            MINOR=0
+          else
+            MINOR=$((LAST + 1))
+          fi
+
+          VERSION="${MAJOR}.${MINOR}"
+          TAG="v${VERSION}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          echo "版本: $VERSION"
+          echo "Tag: $TAG"
+
+      # 获取构建信息
+      - name: Get build information
+        id: build_info
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          SHA=$(git rev-parse HEAD)
+          DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+
+      # 生成 Release 更新日志：不依赖 PR，直接取上一个 Release tag 到 HEAD 之间的 commit。
+      - name: Generate release notes
+        id: notes
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+
+          if [ -z "$LAST_TAG" ]; then
+            NOTES=$(git log --pretty=format:"- %s")
+          else
+            NOTES=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s")
+          fi
+
+          if [ -z "$NOTES" ]; then
+            NOTES="- No changes recorded"
+          fi
+
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      # 构建前端
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci --no-fund --no-audit
+          npm run build
+          cd ..
+
+          rm -rf cmd/ffmpeg-remote-ui/web
+          mkdir -p cmd/ffmpeg-remote-ui/web
+          cp -R frontend/dist/. cmd/ffmpeg-remote-ui/web/
+
+      # Go 检查
+      - name: Vet and test
+        run: |
+          go vet ./...
+          go test ./...
+
+      # 编译多架构
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.build_info.outputs.commit }}
+          BUILD_DATE: ${{ steps.build_info.outputs.date }}
+        run: |
+          mkdir -p dist
+
+          # 纯 Go 静态链接，产物不依赖目标机器的 libc
+          export CGO_ENABLED=0
+
+          LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildDate=$BUILD_DATE"
+
+          GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-linux-amd64 ./cmd/ffmpeg-remote-ui
+
+          GOOS=linux GOARCH=arm64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-linux-arm64 ./cmd/ffmpeg-remote-ui
+
+          GOOS=linux GOARCH=arm GOARM=7 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-linux-armv7 ./cmd/ffmpeg-remote-ui
+
+          GOOS=linux GOARCH=loong64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-linux-loong64 ./cmd/ffmpeg-remote-ui
+
+          GOOS=linux GOARCH=riscv64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-linux-riscv64 ./cmd/ffmpeg-remote-ui
+
+          cp LICENSE dist/LICENSE
+
+      # 创建 Release
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          # tag 指向本次实际构建的 commit：不指定的话它落在运行时默认分支的 HEAD，
+          # main 一旦前移，tag 和二进制就不同源了。
+          TARGET: ${{ steps.build_info.outputs.sha }}
+          # 经 env 传值：notes 里可能含引号、反引号等字符，
+          # 直接把它插进 run 脚本会被 shell 当成语法解析。
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --target "$TARGET" \
+            --notes "$NOTES"
