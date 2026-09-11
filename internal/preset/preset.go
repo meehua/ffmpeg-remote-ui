@@ -2,7 +2,7 @@
 //
 // 存储刻意做得很薄：本包不认识任何 FFmpeg 概念，只保证一份 JSON 被可靠地
 // 写进 <配置目录>/presets/<名字>.json，并能原样读回来。配方本身的结构由
-// 前端定义（见 frontend/src/features/workspace/preset.ts），前端会在读取时
+// 前端定义（见 frontend/src/features/presets/recipe.ts），前端会在读取时
 // 做一次宽容解析并补上缺省值，因此这里新增字段、前端升级版本都不需要改后端。
 //
 // 这样做的好处是：预设文件是干净、可读、可手工编辑的 JSON，后端也不会因为
@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // 扩展名与长度限制。
@@ -39,7 +41,21 @@ var (
 	ErrNotFound = errors.New("预设不存在")
 	// ErrInvalidRecipe 表示配方不是合法的 JSON 对象。
 	ErrInvalidRecipe = errors.New("配方必须是合法的 JSON 对象")
+
+	// errNotFound 是带码的「预设不存在」。调用方仍按哨兵值判断（errors.Is），
+	// 码与文案由它一并带出去。
+	errNotFound = apierr.Newf(apierr.CodePresetNotFound, "预设不存在").Wrap(ErrNotFound)
 )
+
+// nameErr 造一条「预设名不合法」的具体原因，并保留哨兵供调用方判断。
+func nameErr(code apierr.Code, params map[string]any, message string) error {
+	return apierr.New(code, params, "%s", message).Wrap(ErrInvalidName)
+}
+
+// recipeErr 同上，用于配方校验。
+func recipeErr(code apierr.Code, params map[string]any, message string) error {
+	return apierr.New(code, params, "%s", message).Wrap(ErrInvalidRecipe)
+}
 
 // Preset 是一份完整的预设。
 type Preset struct {
@@ -64,7 +80,9 @@ type Store struct {
 // NewStore 打开（必要时创建）预设目录。
 func NewStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("无法创建预设目录 %s: %w", dir, err)
+		return nil, apierr.New(apierr.CodePresetDirCreateFailed,
+			map[string]any{"dir": dir, "cause": err.Error()},
+			"无法创建预设目录 %s: %v", dir, err)
 	}
 	return &Store{dir: dir}, nil
 }
@@ -76,17 +94,19 @@ func (s *Store) Dir() string { return s.dir }
 //
 // 单个文件解析失败不会让整个列表失败：坏文件被跳过并作为警告返回，
 // 用户因此仍能看到其余预设，同时知道哪个文件需要修。
-func (s *Store) List() ([]Meta, []string, error) {
+func (s *Store) List() ([]Meta, []*apierr.Warning, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("无法读取预设目录 %s: %w", s.dir, err)
+		return nil, nil, apierr.New(apierr.CodePresetDirReadFailed,
+			map[string]any{"dir": s.dir, "cause": err.Error()},
+			"无法读取预设目录 %s: %v", s.dir, err)
 	}
 
 	var out []Meta
-	var warnings []string
+	var warnings []*apierr.Warning
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ext) || strings.HasPrefix(name, ".") {
@@ -94,12 +114,16 @@ func (s *Store) List() ([]Meta, []string, error) {
 		}
 		info, err := entry.Info()
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("无法读取 %s：%v", name, err))
+			warnings = append(warnings, apierr.New(apierr.CodePresetItemUnreadable,
+				map[string]any{"name": name, "cause": err.Error()},
+				"无法读取 %s：%v", name, err))
 			continue
 		}
 		p, err := s.Get(strings.TrimSuffix(name, ext))
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s 不是可用的预设：%v", name, err))
+			warnings = append(warnings, apierr.New(apierr.CodePresetItemNotUsable,
+				map[string]any{"name": name, "cause": err.Error()},
+				"%s 不是可用的预设：%v", name, err))
 			continue
 		}
 		out = append(out, Meta{Name: p.Name, UpdatedAt: p.UpdatedAt, Size: info.Size()})
@@ -117,14 +141,18 @@ func (s *Store) Get(name string) (Preset, error) {
 	raw, err := os.ReadFile(s.path(name))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return Preset{}, ErrNotFound
+			return Preset{}, errNotFound
 		}
-		return Preset{}, fmt.Errorf("无法读取预设 %s: %w", name, err)
+		return Preset{}, apierr.New(apierr.CodePresetReadFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法读取预设 %s: %v", name, err)
 	}
 
 	var p Preset
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Preset{}, fmt.Errorf("预设文件不是合法 JSON: %w", err)
+		return Preset{}, apierr.New(apierr.CodePresetFileInvalidJSON,
+			map[string]any{"name": name, "cause": err.Error()},
+			"预设文件不是合法 JSON: %v", err)
 	}
 	p.Name = name
 	return p, nil
@@ -140,7 +168,9 @@ func (s *Store) Save(name string, recipe json.RawMessage) (Preset, error) {
 		return Preset{}, err
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return Preset{}, fmt.Errorf("无法创建预设目录 %s: %w", s.dir, err)
+		return Preset{}, apierr.New(apierr.CodePresetDirCreateFailed,
+			map[string]any{"dir": s.dir, "cause": err.Error()},
+			"无法创建预设目录 %s: %v", s.dir, err)
 	}
 
 	p := Preset{
@@ -158,23 +188,33 @@ func (s *Store) Save(name string, recipe json.RawMessage) (Preset, error) {
 	path := s.path(name)
 	tmp, err := os.CreateTemp(s.dir, "."+name+".tmp*")
 	if err != nil {
-		return Preset{}, fmt.Errorf("无法写入预设 %s: %w", name, err)
+		return Preset{}, apierr.New(apierr.CodePresetWriteFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法写入预设 %s: %v", name, err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return Preset{}, err
+		return Preset{}, apierr.New(apierr.CodePresetWriteFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法写入预设 %s: %v", name, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return Preset{}, err
+		return Preset{}, apierr.New(apierr.CodePresetWriteFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法写入预设 %s: %v", name, err)
 	}
 	if err := os.Chmod(tmpName, 0o600); err != nil {
-		return Preset{}, err
+		return Preset{}, apierr.New(apierr.CodePresetWriteFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法写入预设 %s: %v", name, err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return Preset{}, fmt.Errorf("无法写入预设 %s: %w", name, err)
+		return Preset{}, apierr.New(apierr.CodePresetWriteFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法写入预设 %s: %v", name, err)
 	}
 	return p, nil
 }
@@ -186,9 +226,11 @@ func (s *Store) Remove(name string) error {
 	}
 	if err := os.Remove(s.path(name)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return ErrNotFound
+			return errNotFound
 		}
-		return fmt.Errorf("无法删除预设 %s: %w", name, err)
+		return apierr.New(apierr.CodePresetRemoveFailed,
+			map[string]any{"name": name, "cause": err.Error()},
+			"无法删除预设 %s: %v", name, err)
 	}
 	return nil
 }
@@ -203,28 +245,32 @@ func (s *Store) path(name string) string {
 // 名字里带 "/" 或 ".." 就不是「起个名字」，而是在指定别处的路径。
 func ValidateName(name string) error {
 	if name == "" {
-		return fmt.Errorf("%w：不能为空", ErrInvalidName)
+		return nameErr(apierr.CodePresetNameEmpty, nil, "预设名不合法：不能为空")
 	}
 	if !utf8.ValidString(name) {
-		return fmt.Errorf("%w：不是合法的 UTF-8", ErrInvalidName)
+		return nameErr(apierr.CodePresetNameNotUTF8, nil, "预设名不合法：不是合法的 UTF-8")
 	}
 	if utf8.RuneCountInString(name) > MaxNameRunes {
-		return fmt.Errorf("%w：不能超过 %d 个字符", ErrInvalidName, MaxNameRunes)
+		return nameErr(apierr.CodePresetNameTooLong,
+			map[string]any{"max": MaxNameRunes},
+			fmt.Sprintf("预设名不合法：不能超过 %d 个字符", MaxNameRunes))
 	}
 	if name == "." || name == ".." || strings.HasPrefix(name, ".") {
-		return fmt.Errorf("%w：不能以点开头", ErrInvalidName)
+		return nameErr(apierr.CodePresetNameLeadingDot, nil, "预设名不合法：不能以点开头")
 	}
 	for _, r := range name {
 		if r < 0x20 || r == 0x7f {
-			return fmt.Errorf("%w：不能包含控制字符", ErrInvalidName)
+			return nameErr(apierr.CodePresetNameControlChar, nil, "预设名不合法：不能包含控制字符")
 		}
 		switch r {
 		case '/', '\\', '*', '?', ':', '"', '<', '>', '|':
-			return fmt.Errorf("%w：不能包含 %q", ErrInvalidName, r)
+			return nameErr(apierr.CodePresetNameForbidden,
+				map[string]any{"char": string(r)},
+				fmt.Sprintf("预设名不合法：不能包含 %q", r))
 		}
 	}
 	if strings.HasSuffix(name, " ") {
-		return fmt.Errorf("%w：结尾不能是空格", ErrInvalidName)
+		return nameErr(apierr.CodePresetNameTrailingGap, nil, "预设名不合法：结尾不能是空格")
 	}
 	return nil
 }
@@ -236,13 +282,16 @@ func ValidateName(name string) error {
 func validateRecipe(recipe json.RawMessage) error {
 	trimmed := bytes.TrimSpace(recipe)
 	if len(trimmed) == 0 {
-		return fmt.Errorf("%w：为空", ErrInvalidRecipe)
+		return recipeErr(apierr.CodePresetRecipeEmpty, nil, "配方必须是合法的 JSON 对象：为空")
 	}
 	if len(trimmed) > MaxRecipeBytes {
-		return fmt.Errorf("%w：超过 %d 字节", ErrInvalidRecipe, MaxRecipeBytes)
+		return recipeErr(apierr.CodePresetRecipeTooLarge,
+			map[string]any{"max": MaxRecipeBytes},
+			fmt.Sprintf("配方必须是合法的 JSON 对象：超过 %d 字节", MaxRecipeBytes))
 	}
 	if trimmed[0] != '{' || !json.Valid(trimmed) {
-		return ErrInvalidRecipe
+		return apierr.Newf(apierr.CodePresetRecipeInvalid, "配方必须是合法的 JSON 对象").
+			Wrap(ErrInvalidRecipe)
 	}
 	return nil
 }

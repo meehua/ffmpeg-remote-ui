@@ -14,12 +14,13 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // appDirName 是用户配置目录下的子文件夹名。
@@ -99,7 +100,8 @@ type Info struct {
 	// Sources 记录每个字段最终由谁决定：default / file / env。
 	Sources map[string]string `json:"sources"`
 	// Warnings 是需要让用户知道但又不致命的问题（配置写不进去、JSON 语法错误等）。
-	Warnings []string `json:"warnings,omitempty"`
+	// 带码而不是成句文本：配置问题一样会显示在界面上，界面语言是什么由用户定。
+	Warnings []*apierr.Warning `json:"warnings,omitempty"`
 }
 
 // fileConfig 用指针区分「文件里没写这个字段」与「写了零值」。
@@ -138,7 +140,8 @@ func Load() (Config, Info) {
 		exists = true
 		var file fileConfig
 		if err := json.Unmarshal(raw, &file); err != nil {
-			info.Warnings = append(info.Warnings, fmt.Sprintf(
+			info.Warnings = append(info.Warnings, apierr.New(apierr.CodeConfigInvalidJSON,
+				map[string]any{"path": info.Path, "cause": err.Error()},
 				"配置文件 %s 不是合法 JSON（%v）：本次忽略该文件，环境变量与默认值照常生效，文件未被改动",
 				info.Path, err))
 			break
@@ -147,7 +150,9 @@ func Load() (Config, Info) {
 	case errors.Is(readErr, fs.ErrNotExist):
 		// 首次运行，稍后写入。
 	default:
-		info.Warnings = append(info.Warnings, fmt.Sprintf("读取配置文件 %s 失败：%v", info.Path, readErr))
+		info.Warnings = append(info.Warnings, apierr.New(apierr.CodeConfigReadFailed,
+			map[string]any{"path": info.Path, "cause": readErr.Error()},
+			"读取配置文件 %s 失败：%v", info.Path, readErr))
 	}
 
 	applyEnv(&cfg, info.Sources, &info)
@@ -157,7 +162,9 @@ func Load() (Config, Info) {
 
 	if !exists {
 		if err := write(info.Path, cfg); err != nil {
-			info.Warnings = append(info.Warnings, fmt.Sprintf("无法写入配置文件 %s：%v", info.Path, err))
+			info.Warnings = append(info.Warnings, apierr.New(apierr.CodeConfigWriteFailed,
+				map[string]any{"path": info.Path, "cause": err.Error()},
+				"无法写入配置文件 %s：%v", info.Path, err))
 		} else {
 			info.Created = true
 		}
@@ -172,7 +179,8 @@ func fallback(cause error) (Config, Info) {
 	for _, field := range Fields {
 		info.Sources[field] = SourceDefault
 	}
-	info.Warnings = append(info.Warnings, fmt.Sprintf(
+	info.Warnings = append(info.Warnings, apierr.New(apierr.CodeConfigUnavailable,
+		map[string]any{"cause": cause.Error()},
 		"%v：本次只用环境变量与默认值，配置文件与预设都不可用", cause))
 	applyEnv(&cfg, info.Sources, &info)
 	normalize(&cfg)
@@ -225,7 +233,8 @@ func applyEnv(cfg *Config, sources map[string]string, info *Info) {
 		n, err := strconv.Atoi(v)
 		switch {
 		case err != nil || n < 1:
-			info.Warnings = append(info.Warnings, fmt.Sprintf(
+			info.Warnings = append(info.Warnings, apierr.New(apierr.CodeConfigEnvNotInteger,
+				map[string]any{"name": EnvMaxJobs, "value": v, "fallback": cfg.MaxConcurrentJobs},
 				"环境变量 %s=%q 不是正整数，沿用 %d", EnvMaxJobs, v, cfg.MaxConcurrentJobs))
 		default:
 			cfg.MaxConcurrentJobs = n
@@ -262,13 +271,16 @@ func Dir() (string, error) {
 	if v := strings.TrimSpace(os.Getenv(EnvConfigDir)); v != "" {
 		abs, err := filepath.Abs(v)
 		if err != nil {
-			return "", fmt.Errorf("环境变量 %s=%q 不是可用路径: %w", EnvConfigDir, v, err)
+			return "", apierr.New(apierr.CodeConfigEnvNotPath,
+				map[string]any{"name": EnvConfigDir, "value": v, "cause": err.Error()},
+				"环境变量 %s=%q 不是可用路径: %v", EnvConfigDir, v, err)
 		}
 		return filepath.Clean(abs), nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("无法确定用户配置目录: %w", err)
+		return "", apierr.New(apierr.CodeConfigDirUnknown,
+			map[string]any{"cause": err.Error()}, "无法确定用户配置目录: %v", err)
 	}
 	return filepath.Join(base, appDirName), nil
 }

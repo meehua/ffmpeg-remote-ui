@@ -13,10 +13,22 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // maxLogLines 限制每个任务保留的日志行数，避免长时间转码把内存吃光。
 const maxLogLines = 400
+
+// 任务阶段。
+//
+// 执行器上报阶段码而不是成句的文字：文案属于界面，同一条「转码中」要能按
+// 用户选的语言渲染。前端按 `job.phase.<码>` 查表，查不到就照原样显示，
+// 因此这里加阶段不需要前端同步发版。
+const (
+	PhaseProbe     = "probe"
+	PhaseTranscode = "transcode"
+)
 
 // idSeq 保证同一毫秒内提交的任务也不会撞 ID。
 var idSeq atomic.Uint64
@@ -51,7 +63,7 @@ type Job struct {
 
 	Status   Status  `json:"status"`
 	Progress float64 `json:"progress"`        // 0-100
-	Phase    string  `json:"phase,omitempty"` // 由执行器上报的阶段说明
+	Phase    string  `json:"phase,omitempty"` // 阶段码，见 PhaseProbe / PhaseTranscode
 	Position int     `json:"position"`        // 排队位置，0 表示不在排队
 
 	DurationMS int64   `json:"durationMs,omitempty"` // 输入总时长
@@ -68,7 +80,24 @@ type Job struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 
+	// Error 是失败原因的中文原文，兼作界面没有对应 code 文案时的兜底。
 	Error string `json:"error,omitempty"`
+	// ErrorCode / ErrorParams 让界面用当前语言重述同一条失败原因。
+	// 事件流是单向推送，界面拿到的只有任务对象本身，所以码挂在任务上。
+	ErrorCode   string         `json:"errorCode,omitempty"`
+	ErrorParams map[string]any `json:"errorParams,omitempty"`
+}
+
+// setJobError 记录失败原因：成句的中文照旧进 Error，能提取出码的话一并带上。
+func setJobError(j *Job, err error) {
+	j.Error = err.Error()
+	j.ErrorCode = ""
+	j.ErrorParams = nil
+	var apiErr *apierr.Error
+	if errors.As(err, &apiErr) {
+		j.ErrorCode = string(apiErr.Code)
+		j.ErrorParams = apiErr.Params
+	}
 }
 
 // Progress 是执行器上报的一次进度快照。
@@ -120,9 +149,10 @@ func (s *Sink) Log(line string) { s.q.appendLog(s.id, line) }
 // Progress 上报一次进度。
 func (s *Sink) Progress(p Progress) { s.q.applyProgress(s.id, p) }
 
-// Phase 标注当前阶段，例如 "探测输入"。
-func (s *Sink) Phase(name string) {
-	s.q.mutate(s.id, func(j *Job) { j.Phase = name })
+// Phase 标注当前阶段。传的是阶段码（PhaseProbe / PhaseTranscode），不是给人
+// 看的文字——显示文案由界面按当前语言给出。
+func (s *Sink) Phase(code string) {
+	s.q.mutate(s.id, func(j *Job) { j.Phase = code })
 }
 
 // SetDuration 告诉队列输入的总时长，进度百分比据此计算。
@@ -196,14 +226,15 @@ func (q *Queue) Submit(j Job) (Job, error) {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
-		return Job{}, errors.New("队列已关闭")
+		return Job{}, apierr.Newf(apierr.CodeJobQueueClosed, "队列已关闭")
 	}
 	if j.ID == "" {
 		j.ID = nextID()
 	}
 	if _, dup := q.jobs[j.ID]; dup {
 		q.mu.Unlock()
-		return Job{}, fmt.Errorf("任务 ID 重复: %s", j.ID)
+		return Job{}, apierr.New(apierr.CodeJobIDDuplicate,
+			map[string]any{"id": j.ID}, "任务 ID 重复: %s", j.ID)
 	}
 	j.Status = StatusQueued
 	j.Progress = 0
@@ -264,7 +295,7 @@ func (q *Queue) Cancel(id string) error {
 	j := q.jobs[id]
 	if j == nil {
 		q.mu.Unlock()
-		return errors.New("任务不存在")
+		return apierr.Newf(apierr.CodeJobNotFound, "任务不存在")
 	}
 	switch j.Status {
 	case StatusRunning:
@@ -279,7 +310,7 @@ func (q *Queue) Cancel(id string) error {
 		now := time.Now()
 		j.Status = StatusCancelled
 		j.FinishedAt = &now
-		j.Error = "已取消"
+		setJobError(j, apierr.Newf(apierr.CodeJobCancelled, "已取消"))
 		j.Position = 0
 		q.refreshPositionsLocked()
 		out := *j
@@ -289,7 +320,8 @@ func (q *Queue) Cancel(id string) error {
 	default:
 		status := j.Status
 		q.mu.Unlock()
-		return fmt.Errorf("任务已结束（%s）", status)
+		return apierr.New(apierr.CodeJobFinished,
+			map[string]any{"status": string(status)}, "任务已结束（%s）", status)
 	}
 }
 
@@ -299,16 +331,18 @@ func (q *Queue) Retry(id string) (Job, error) {
 	j := q.jobs[id]
 	if j == nil {
 		q.mu.Unlock()
-		return Job{}, errors.New("任务不存在")
+		return Job{}, apierr.Newf(apierr.CodeJobNotFound, "任务不存在")
 	}
 	if !j.Status.Terminal() {
 		q.mu.Unlock()
-		return Job{}, errors.New("任务尚未结束")
+		return Job{}, apierr.Newf(apierr.CodeJobNotFinished, "任务尚未结束")
 	}
 	j.Status = StatusQueued
 	j.Progress = 0
 	j.Phase = ""
 	j.Error = ""
+	j.ErrorCode = ""
+	j.ErrorParams = nil
 	j.Position = 0
 	j.OutTimeMS, j.Frame, j.FPS, j.TotalSize = 0, 0, 0, 0
 	j.Speed, j.Bitrate = "", ""
@@ -330,10 +364,10 @@ func (q *Queue) Remove(id string) error {
 	defer q.mu.Unlock()
 	j := q.jobs[id]
 	if j == nil {
-		return errors.New("任务不存在")
+		return apierr.Newf(apierr.CodeJobNotFound, "任务不存在")
 	}
 	if !j.Status.Terminal() {
-		return errors.New("任务仍在队列中，请先取消")
+		return apierr.Newf(apierr.CodeJobStillQueued, "任务仍在队列中，请先取消")
 	}
 	delete(q.jobs, id)
 	delete(q.logs, id)
@@ -451,7 +485,8 @@ func (q *Queue) execute(ctx context.Context, id string) {
 	var err error
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("任务执行器内部错误: %v", r)
+			err = apierr.New(apierr.CodeJobInternal,
+				map[string]any{"cause": fmt.Sprint(r)}, "任务执行器内部错误: %v", r)
 		}
 		q.finish(ctx, id, err)
 	}()
@@ -485,11 +520,11 @@ func (q *Queue) finish(ctx context.Context, id string, err error) {
 		case cancelled:
 			j.Status = StatusCancelled
 			if j.Error == "" {
-				j.Error = "已取消"
+				setJobError(j, apierr.Newf(apierr.CodeJobCancelled, "已取消"))
 			}
 		case err != nil:
 			j.Status = StatusFailed
-			j.Error = err.Error()
+			setJobError(j, err)
 		default:
 			j.Status = StatusDone
 			j.Progress = 100

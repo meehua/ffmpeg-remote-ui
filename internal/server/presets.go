@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 	"github.com/meehua/ffmpeg-remote-ui/internal/preset"
 )
 
@@ -26,7 +27,8 @@ func (s *Server) configInfo(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) presetStore(w http.ResponseWriter) *preset.Store {
 	if s.presets == nil {
-		writeErr(w, http.StatusServiceUnavailable, errors.New("预设目录不可用：未能确定用户配置目录"))
+		writeErr(w, http.StatusServiceUnavailable, apierr.Newf(apierr.CodePresetDirUnavailable,
+			"预设目录不可用：未能确定用户配置目录"))
 		return nil
 	}
 	return s.presets
@@ -95,6 +97,10 @@ func (s *Server) presetDelete(w http.ResponseWriter, r *http.Request) {
 	write(w, map[string]any{"ok": true})
 }
 
+// writePresetErr 把预设层的错误映射成状态码。
+//
+// 判断仍走哨兵值（errors.Is）：apierr.Error 实现了 Unwrap，所以带码的错误
+// 也认得出，两件事互不干扰。
 func writePresetErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, preset.ErrNotFound):

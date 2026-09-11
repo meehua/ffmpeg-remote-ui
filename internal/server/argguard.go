@@ -1,9 +1,10 @@
 package server
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // checkArgs 在配置了媒体根目录时，扫描参数里出现的文件路径。
@@ -21,10 +22,14 @@ func (s *Server) checkArgs(args []string) error {
 			// 绝对路径再判断，否则 ../../etc/passwd 这类写法能整个绕过去。
 			abs, err := filepath.Abs(candidate)
 			if err != nil {
-				return fmt.Errorf("无法解析参数里的路径 %s: %w", candidate, err)
+				return apierr.New(apierr.CodePathUnresolved,
+					map[string]any{"path": candidate, "cause": err.Error()},
+					"无法解析参数里的路径 %s: %v", candidate, err)
 			}
 			if !s.allowedPath(abs) {
-				return fmt.Errorf("参数里的路径不在允许的媒体目录中：%s", candidate)
+				return apierr.New(apierr.CodeArgPathOutsideRoots,
+					map[string]any{"path": candidate},
+					"参数里的路径不在允许的媒体目录中：%s", candidate)
 			}
 		}
 	}

@@ -1,8 +1,6 @@
 package server
 
 import (
-	"errors"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -10,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // 一次扫描返回的文件数上限。
@@ -53,21 +53,25 @@ func (s *Server) scanFiles(w http.ResponseWriter, r *http.Request) {
 
 	root := strings.TrimSpace(query.Get("path"))
 	if root == "" {
-		writeErr(w, http.StatusBadRequest, errors.New("缺少扫描目录"))
+		writeErr(w, http.StatusBadRequest,
+			apierr.Newf(apierr.CodeScanPathMissing, "缺少扫描目录"))
 		return
 	}
 	root = filepath.Clean(root)
 	if !s.allowedPath(root) {
-		writeErr(w, http.StatusForbidden, errors.New("路径不在允许的媒体目录中"))
+		writeErr(w, http.StatusForbidden, apierr.New(apierr.CodePathOutsideRoots,
+			map[string]any{"path": root}, "路径不在允许的媒体目录中：%s", root))
 		return
 	}
 	info, err := os.Stat(root)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("扫描目录不可用: %w", err))
+		writeErr(w, http.StatusBadRequest, apierr.New(apierr.CodeScanUnavailable,
+			map[string]any{"path": root, "cause": err.Error()}, "扫描目录不可用: %v", err))
 		return
 	}
 	if !info.IsDir() {
-		writeErr(w, http.StatusBadRequest, errors.New("扫描目录必须是一个目录"))
+		writeErr(w, http.StatusBadRequest,
+			apierr.Newf(apierr.CodeScanNotDirectory, "扫描目录必须是一个目录"))
 		return
 	}
 

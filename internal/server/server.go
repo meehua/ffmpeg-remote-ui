@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 	"github.com/meehua/ffmpeg-remote-ui/internal/config"
 	"github.com/meehua/ffmpeg-remote-ui/internal/ffmpeg"
 	"github.com/meehua/ffmpeg-remote-ui/internal/hardware"
@@ -156,7 +157,9 @@ func (s *Server) ffmpegHelp(w http.ResponseWriter, r *http.Request) {
 	h, err := s.ff.Help(r.URL.Query().Get("target"), r.URL.Query().Get("name"))
 	if err != nil {
 		// FFmpeg 的原始错误对排查很关键，所以连同结果一起返回。
-		write(w, map[string]any{"error": err.Error(), "help": h})
+		body := errorFields(err)
+		body["help"] = h
+		write(w, body)
 		return
 	}
 	// 成功时也包一层：客户端只需判断有没有 error，不必猜这次返回的是哪种形状。
@@ -166,7 +169,8 @@ func (s *Server) ffmpegHelp(w http.ResponseWriter, r *http.Request) {
 func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if !s.allowedPath(path) {
-		writeErr(w, http.StatusForbidden, errors.New("路径不在允许的媒体目录中"))
+		writeErr(w, http.StatusForbidden,
+			apierr.Newf(apierr.CodePathOutsideRoots, "路径不在允许的媒体目录中"))
 		return
 	}
 	info, err := s.ff.Probe(path)
@@ -244,7 +248,8 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.allowedPath(dir) {
-		writeErr(w, http.StatusForbidden, errors.New("路径不在允许的媒体目录中"))
+		writeErr(w, http.StatusForbidden,
+			apierr.Newf(apierr.CodePathOutsideRoots, "路径不在允许的媒体目录中"))
 		return
 	}
 	entries, err := os.ReadDir(dir)
@@ -326,7 +331,7 @@ func (s *Server) jobsCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) jobGet(w http.ResponseWriter, r *http.Request) {
 	job, ok := s.queue.Get(r.PathValue("id"))
 	if !ok {
-		writeErr(w, http.StatusNotFound, errors.New("任务不存在"))
+		writeErr(w, http.StatusNotFound, apierr.Newf(apierr.CodeJobNotFound, "任务不存在"))
 		return
 	}
 	write(w, job)
@@ -335,7 +340,7 @@ func (s *Server) jobGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if _, ok := s.queue.Get(id); !ok {
-		writeErr(w, http.StatusNotFound, errors.New("任务不存在"))
+		writeErr(w, http.StatusNotFound, apierr.Newf(apierr.CodeJobNotFound, "任务不存在"))
 		return
 	}
 	write(w, map[string]any{"id": id, "lines": s.queue.Logs(id)})
@@ -372,41 +377,49 @@ func (s *Server) jobsClear(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) validateJob(input, output string, args []string) error {
 	if input == "" {
-		return errors.New("缺少输入路径")
+		return apierr.Newf(apierr.CodeJobInputMissing, "缺少输入路径")
 	}
 	if output == "" {
-		return errors.New("缺少输出路径")
+		return apierr.Newf(apierr.CodeJobOutputMissing, "缺少输出路径")
 	}
 	if !s.allowedPath(input) {
-		return errors.New("输入路径不在允许的媒体目录中")
+		return apierr.Newf(apierr.CodeJobInputOutsideRoots, "输入路径不在允许的媒体目录中")
 	}
 	if !s.allowedPath(output) {
-		return errors.New("输出路径不在允许的媒体目录中")
+		return apierr.Newf(apierr.CodeJobOutputOutsideRoots, "输出路径不在允许的媒体目录中")
 	}
 	if len(args) > 1024 {
-		return errors.New("参数过多")
+		return apierr.Newf(apierr.CodeJobTooManyArgs, "参数过多")
 	}
 	for _, a := range args {
 		if len(a) > 1<<16 {
-			return errors.New("单个参数过长")
+			return apierr.Newf(apierr.CodeJobArgTooLong, "单个参数过长")
 		}
 		if strings.ContainsRune(a, 0) {
-			return errors.New("参数包含非法字符")
+			return apierr.Newf(apierr.CodeJobArgInvalidChars, "参数包含非法字符")
 		}
 	}
 	if err := s.checkArgs(args); err != nil {
 		return err
 	}
 	if info, err := os.Stat(input); err != nil {
-		return fmt.Errorf("输入不可访问: %w", err)
+		return apierr.New(apierr.CodeJobInputUnreadable,
+			map[string]any{"path": input, "cause": err.Error()},
+			"输入不可访问: %v", err)
 	} else if info.IsDir() {
-		return errors.New("输入是目录")
+		return apierr.Newf(apierr.CodeJobInputIsDir, "输入是目录")
 	}
 	if dir := filepath.Dir(filepath.Clean(output)); dir != "" {
 		if info, err := os.Stat(dir); err != nil {
-			return fmt.Errorf("输出目录不可用: %w", err)
+			return apierr.New(apierr.CodeJobOutputDirUnusable,
+				map[string]any{"dir": dir, "cause": err.Error()},
+				"输出目录不可用: %v", err)
 		} else if !info.IsDir() {
-			return errors.New("输出目录不可用")
+			// 路径存在但不是目录：这里没有底层 err 可引用，给一句等价的描述，
+			// 免得界面按同一个码渲染时缺参数。
+			return apierr.New(apierr.CodeJobOutputDirUnusable,
+				map[string]any{"dir": dir, "cause": "not a directory"},
+				"输出目录不可用: %s 不是目录", dir)
 		}
 	}
 	return nil
@@ -416,7 +429,7 @@ func (s *Server) validateJob(input, output string, args []string) error {
 
 // runJob 被队列调用；它是这个包唯一执行 ffmpeg 的地方。
 func (s *Server) runJob(ctx context.Context, job *queue.Job, sink *queue.Sink) error {
-	sink.Phase("读取输入信息")
+	sink.Phase(queue.PhaseProbe)
 	if info, err := s.ff.Probe(job.Input); err == nil {
 		sink.SetDuration(info.Duration())
 	}
@@ -435,7 +448,7 @@ func (s *Server) runJob(ctx context.Context, job *queue.Job, sink *queue.Sink) e
 	cmd.Stdout = lineWriter(func(line string) { progress.feed(line, sink) })
 	cmd.Stderr = lineWriter(func(line string) { sink.Log(line) })
 
-	sink.Phase("转码中")
+	sink.Phase(queue.PhaseTranscode)
 	err := cmd.Run()
 
 	switch {
@@ -443,7 +456,8 @@ func (s *Server) runJob(ctx context.Context, job *queue.Job, sink *queue.Sink) e
 		// 取消导致的退出不算失败，状态由队列落定为 cancelled。
 		return nil
 	case err != nil:
-		return fmt.Errorf("ffmpeg 退出：%w", err)
+		return apierr.New(apierr.CodeJobFFmpegFailed,
+			map[string]any{"cause": err.Error()}, "ffmpeg 退出：%v", err)
 	}
 	return nil
 }
@@ -529,7 +543,8 @@ func (l *lineSplitter) Write(p []byte) (int, error) {
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeErr(w, http.StatusInternalServerError, errors.New("当前连接不支持流式输出"))
+		writeErr(w, http.StatusInternalServerError,
+			apierr.Newf(apierr.CodeJobStreamUnsupported, "当前连接不支持流式输出"))
 		return
 	}
 
@@ -699,7 +714,8 @@ func containsArg(args []string, want string) bool {
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err := dec.Decode(dst); err != nil {
-		return fmt.Errorf("请求体不是合法 JSON: %w", err)
+		return apierr.New(apierr.CodeBodyInvalidJSON,
+			map[string]any{"cause": err.Error()}, "请求体不是合法 JSON: %v", err)
 	}
 	return nil
 }
@@ -709,10 +725,28 @@ func write(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeErr 输出一条错误。
+//
+// 响应体始终带 error（成句的中文原文），能取到码时再加上 code 与 params，
+// 界面据此用当前语言重述同一条错误；取不到码时只剩兜底文案，界面照原样显示。
 func writeErr(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	_ = json.NewEncoder(w).Encode(errorFields(err))
+}
+
+// errorFields 把一条错误摊平成响应体字段。200 但带错误的接口也复用它，
+// 这样两种响应形状对客户端是一致的。
+func errorFields(err error) map[string]any {
+	body := map[string]any{"error": err.Error()}
+	var apiErr *apierr.Error
+	if errors.As(err, &apiErr) {
+		body["code"] = string(apiErr.Code)
+		if len(apiErr.Params) > 0 {
+			body["params"] = apiErr.Params
+		}
+	}
+	return body
 }
 
 // Listen 绑定监听地址；addr 使用 ":0" 时由系统分配端口。

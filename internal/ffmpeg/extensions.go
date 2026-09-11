@@ -1,10 +1,11 @@
 package ffmpeg
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // extensionTargets 是能报出扩展名的两个方向。
@@ -33,7 +34,9 @@ type ExtensionsResult struct {
 func (s *Service) Extensions(target string) (ExtensionsResult, error) {
 	target = strings.ToLower(strings.TrimSpace(target))
 	if !extensionTargets[target] {
-		return ExtensionsResult{}, fmt.Errorf("不支持的扩展名来源: %s（可用：demuxer、muxer）", target)
+		return ExtensionsResult{}, apierr.New(apierr.CodeFFmpegExtSourceUnsup,
+			map[string]any{"target": target},
+			"不支持的扩展名来源: %s（可用：demuxer、muxer）", target)
 	}
 
 	s.helpMu.Lock()

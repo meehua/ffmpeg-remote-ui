@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // 这个文件解析的是 `ffmpeg -h` / `-h long` / `-h full`。
@@ -80,7 +82,8 @@ var (
 func (s *Service) CliHelp(level string) (CliHelp, error) {
 	level = strings.ToLower(strings.TrimSpace(level))
 	if !cliLevels[level] {
-		return CliHelp{}, fmt.Errorf("不支持的详略级别: %s（可用：空、long、full）", level)
+		return CliHelp{}, apierr.New(apierr.CodeFFmpegLevelUnsupported,
+			map[string]any{"level": level}, "不支持的详略级别: %s（可用：空、long、full）", level)
 	}
 
 	s.helpMu.Lock()
@@ -96,6 +99,7 @@ func (s *Service) CliHelp(level string) (CliHelp, error) {
 	}
 	raw, err := s.run(args...)
 	if err != nil {
+		// 正文是 ffmpeg 自己的报错，照原样交回，不翻译。
 		return CliHelp{Level: level, Raw: raw}, fmt.Errorf("%s -h %s: %w", s.ffmpeg, level, err)
 	}
 

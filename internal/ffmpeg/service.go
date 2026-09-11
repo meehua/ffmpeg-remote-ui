@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -22,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // ---------------------------------------------------------------- 能力列表
@@ -204,7 +205,9 @@ func (s *Service) FFprobePath() string { return s.ffprobe }
 func (s *Service) Refresh() error {
 	versionOut, err := s.run("-version")
 	if err != nil {
-		return fmt.Errorf("执行 %s -version 失败: %w", s.ffmpeg, err)
+		return apierr.New(apierr.CodeFFmpegVersionFailed,
+			map[string]any{"ffmpeg": s.ffmpeg, "cause": err.Error()},
+			"执行 %s -version 失败: %v", s.ffmpeg, err)
 	}
 
 	snap := Snapshot{
@@ -321,16 +324,17 @@ func (s *Service) Help(target, name string) (Help, error) {
 	target = strings.TrimSpace(target)
 	name = strings.TrimSpace(name)
 	if target == "" {
-		return Help{}, errors.New("缺少 target")
+		return Help{}, apierr.Newf(apierr.CodeFFmpegTargetMissing, "缺少 target")
 	}
 	if !helpTargets[target] {
-		return Help{}, fmt.Errorf("不支持的 target: %s", target)
+		return Help{}, apierr.New(apierr.CodeFFmpegTargetUnsupported,
+			map[string]any{"target": target}, "不支持的 target: %s", target)
 	}
 	if target != "full" && name == "" {
-		return Help{}, errors.New("缺少 name")
+		return Help{}, apierr.Newf(apierr.CodeFFmpegNameMissing, "缺少 name")
 	}
 	if len(name) > 256 {
-		return Help{}, errors.New("name 过长")
+		return Help{}, apierr.Newf(apierr.CodeFFmpegNameTooLong, "name 过长")
 	}
 
 	key := target + "/" + name
@@ -348,6 +352,7 @@ func (s *Service) Help(target, name string) (Help, error) {
 	raw, err := s.run("-hide_banner", "-h", arg)
 	if err != nil {
 		// 目标不存在时把 ffmpeg 的原始错误一并交回，方便用户自行诊断。
+		// 这一条不码化：它的正文就是 ffmpeg 自己那句话，翻译前缀没有意义。
 		return Help{Target: target, Name: name, Raw: raw}, fmt.Errorf("%s -h %s: %w", s.ffmpeg, arg, err)
 	}
 
@@ -372,11 +377,13 @@ func (s *Service) Probe(path string) (MediaInfo, error) {
 		"-of", "json", path)
 	raw, err := cmd.CombinedOutput()
 	if err != nil {
+		// 同 Help：正文是 ffprobe 自己的报错，照原样交给界面。
 		return MediaInfo{}, fmt.Errorf("ffprobe: %w: %s", err, strings.TrimSpace(string(raw)))
 	}
 	var info MediaInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
-		return MediaInfo{}, fmt.Errorf("解析 ffprobe 输出失败: %w", err)
+		return MediaInfo{}, apierr.New(apierr.CodeFFmpegProbeParseFailed,
+			map[string]any{"cause": err.Error()}, "解析 ffprobe 输出失败: %v", err)
 	}
 	if info.Streams == nil {
 		info.Streams = []map[string]any{}
@@ -401,7 +408,8 @@ func (s *Service) run(args ...string) (string, error) {
 
 	out, err := exec.CommandContext(ctx, s.ffmpeg, args...).CombinedOutput()
 	if ctx.Err() != nil {
-		return string(out), fmt.Errorf("查询超时（%s）", commandTimeout)
+		return string(out), apierr.New(apierr.CodeFFmpegTimeout,
+			map[string]any{"timeout": commandTimeout.String()}, "查询超时（%s）", commandTimeout)
 	}
 	if err != nil {
 		return string(out), err
@@ -860,7 +868,7 @@ func SplitArgs(input string) ([]string, error) {
 		cur.WriteRune('\\')
 	}
 	if quote != 0 {
-		return nil, errors.New("引号没有闭合")
+		return nil, apierr.Newf(apierr.CodeFFmpegQuoteUnclosed, "引号没有闭合")
 	}
 	flush()
 

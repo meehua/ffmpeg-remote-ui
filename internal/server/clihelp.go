@@ -1,9 +1,9 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 	"github.com/meehua/ffmpeg-remote-ui/internal/ffmpeg"
 )
 
@@ -16,8 +16,8 @@ func (s *Server) ffmpegCli(w http.ResponseWriter, r *http.Request) {
 	level := r.URL.Query().Get("level")
 	// 先在这里挡掉写错的档位：那是请求写错了（400），不是 ffmpeg 出问题（502）。
 	if !ffmpeg.ValidLevel(level) {
-		writeErr(w, http.StatusBadRequest,
-			fmt.Errorf("不支持的详略级别 %q（可用：空、long、full）", level))
+		writeErr(w, http.StatusBadRequest, apierr.New(apierr.CodeFFmpegLevelUnsupported,
+			map[string]any{"level": level}, "不支持的详略级别 %q（可用：空、long、full）", level))
 		return
 	}
 

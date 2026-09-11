@@ -1,12 +1,12 @@
 package server
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/meehua/ffmpeg-remote-ui/internal/apierr"
 )
 
 // maxDirBatch 限制一次请求创建的目录数：批量任务的输出目录数量级与之相当。
@@ -28,11 +28,13 @@ func (s *Server) makeDirs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Dirs) == 0 {
-		writeErr(w, http.StatusBadRequest, errors.New("没有需要创建的目录"))
+		writeErr(w, http.StatusBadRequest,
+			apierr.Newf(apierr.CodeDirEmptyList, "没有需要创建的目录"))
 		return
 	}
 	if len(req.Dirs) > maxDirBatch {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("一次最多创建 %d 个目录", maxDirBatch))
+		writeErr(w, http.StatusBadRequest, apierr.New(apierr.CodeDirTooMany,
+			map[string]any{"max": maxDirBatch}, "一次最多创建 %d 个目录", maxDirBatch))
 		return
 	}
 
@@ -40,23 +42,28 @@ func (s *Server) makeDirs(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range req.Dirs {
 		dir := filepath.Clean(strings.TrimSpace(raw))
 		if dir == "" || !filepath.IsAbs(dir) {
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("目录必须是绝对路径：%s", raw))
+			writeErr(w, http.StatusBadRequest, apierr.New(apierr.CodeDirNotAbsolute,
+				map[string]any{"path": raw}, "目录必须是绝对路径：%s", raw))
 			return
 		}
 		if !s.allowedPath(dir) {
-			writeErr(w, http.StatusForbidden, fmt.Errorf("目录不在允许的媒体目录中：%s", dir))
+			writeErr(w, http.StatusForbidden, apierr.New(apierr.CodeDirOutsideRoots,
+				map[string]any{"path": dir}, "目录不在允许的媒体目录中：%s", dir))
 			return
 		}
 		if info, err := os.Stat(dir); err == nil {
 			if !info.IsDir() {
-				writeErr(w, http.StatusBadRequest, fmt.Errorf("同名文件已存在，无法作为目录：%s", dir))
+				writeErr(w, http.StatusBadRequest, apierr.New(apierr.CodeDirNameTaken,
+					map[string]any{"path": dir}, "同名文件已存在，无法作为目录：%s", dir))
 				return
 			}
 			existing++
 			continue
 		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			writeErr(w, http.StatusInternalServerError, fmt.Errorf("创建目录 %s 失败: %w", dir, err))
+			writeErr(w, http.StatusInternalServerError, apierr.New(apierr.CodeDirCreateFailed,
+				map[string]any{"path": dir, "cause": err.Error()},
+				"创建目录 %s 失败: %v", dir, err))
 			return
 		}
 		created++
