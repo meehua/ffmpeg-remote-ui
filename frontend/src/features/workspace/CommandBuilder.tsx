@@ -12,6 +12,8 @@ import type {
 import { Field, Select, Switch, TextInput } from '../../components/Controls';
 import { ErrorNote, Spinner } from '../../components/Display';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
+import type { MessageKey } from '../../i18n';
+import { useI18n } from '../../i18n/LocaleProvider';
 import { cx } from '../../utils/format';
 import {
   defaultPosition,
@@ -42,11 +44,12 @@ const emptyStream: StreamSetting = { codec: '', options: {} };
  */
 const MEDIA_FLAG: Record<string, string> = { video: 'V', audio: 'A', subtitle: 'S', data: 'D' };
 
-const MEDIA_LABEL: Record<string, string> = {
-  video: '视频',
-  audio: '音频',
-  subtitle: '字幕',
-  data: '数据',
+/** 媒体类型的显示名；类型本身来自 ffmpeg 的分节，映射不中就用原文。 */
+const MEDIA_KEY: Record<string, MessageKey> = {
+  video: 'builder.media.video',
+  audio: 'builder.media.audio',
+  subtitle: 'builder.media.subtitle',
+  data: 'builder.media.data',
 };
 
 interface StreamKindInfo {
@@ -100,6 +103,7 @@ export function CommandBuilder({
   settings,
   onChange,
 }: CommandBuilderProps) {
+  const { t } = useI18n();
   const renderNodes = useMemo(() => devices.filter((item) => item.renderNode), [devices]);
   const streamKinds = useMemo(() => streamKindsOf(cliHelp), [cliHelp]);
 
@@ -108,15 +112,12 @@ export function CommandBuilder({
 
   return (
     <div className={styles.builder}>
-      <Field
-        label="硬件设备"
-        hint="设备类型与节点都取自服务器；多 GPU 时显式指定可避免 FFmpeg 挑错设备。"
-      >
+      <Field label={t('builder.hwDevice')} hint={t('builder.hwDevice.hint')}>
         <Select
           value={settings.hwDevice.type}
           onChange={(event) => setHwDevice({ type: event.target.value })}
         >
-          <option value="">不初始化（交给 FFmpeg 默认）</option>
+          <option value="">{t('builder.hwDevice.none')}</option>
           {snapshot.hwDeviceTypes.map((type) => (
             <option key={type} value={type}>
               {type}
@@ -126,18 +127,16 @@ export function CommandBuilder({
       </Field>
 
       {snapshot.hwDeviceTypes.length === 0 ? (
-        <p className={styles.sectionMeta}>
-          这套 FFmpeg 没有报告任何硬件设备类型（`-init_hw_device list` 为空）。
-        </p>
+        <p className={styles.sectionMeta}>{t('builder.hwDevice.empty')}</p>
       ) : null}
 
       {settings.hwDevice.type !== '' ? (
-        <Field label="设备节点" hint="留空表示让 FFmpeg 在选中的类型里自己挑。">
+        <Field label={t('builder.hwNode')} hint={t('builder.hwNode.hint')}>
           <Select
             value={settings.hwDevice.device}
             onChange={(event) => setHwDevice({ device: event.target.value })}
           >
-            <option value="">自动选择</option>
+            <option value="">{t('builder.hwNode.auto')}</option>
             {renderNodes.map((device) => (
               <option
                 key={device.id}
@@ -190,25 +189,23 @@ interface StreamEditorProps {
 
 /** 一路流的编码器与它的参数。 */
 function StreamEditor({ kind, snapshot, stream, onChange }: StreamEditorProps) {
+  const { t } = useI18n();
   const flag = MEDIA_FLAG[kind.media] ?? '';
   const encoders = useMemo(
     () => snapshot.encoders.filter((item) => flag !== '' && item.flags?.startsWith(flag)),
     [snapshot.encoders, flag],
   );
-  const label = MEDIA_LABEL[kind.media] ?? kind.media;
+  const media = MEDIA_KEY[kind.media] ? t(MEDIA_KEY[kind.media]) : kind.media;
 
   return (
     <>
-      <Field
-        label={`${label}编码器`}
-        hint="copy 表示这一路直接复制、不重新编码；留空则由输出格式自己挑编码器。"
-      >
+      <Field label={t('builder.stream.encoder', { media })} hint={t('builder.stream.encoder.hint')}>
         <Select
           value={stream.codec}
           onChange={(event) => onChange({ codec: event.target.value, options: {} })}
         >
-          <option value="">不设置（由输出格式选默认编码器）</option>
-          <option value="copy">copy · 直接复制流，不重新编码</option>
+          <option value="">{t('builder.stream.codec.unset')}</option>
+          <option value="copy">{t('builder.stream.codec.copy')}</option>
           {encoders.map((item) => (
             <option key={item.name} value={item.name}>
               {item.name} · {item.description ?? ''}
@@ -219,13 +216,13 @@ function StreamEditor({ kind, snapshot, stream, onChange }: StreamEditorProps) {
 
       {encoders.length === 0 ? (
         <p className={styles.sectionMeta}>
-          这套 FFmpeg 没有报告{label}编码器（`-encoders` 里没有 {flag || '该'} 类）。
+          {t('builder.stream.encoder.empty', { media, flag: flag || '?' })}
         </p>
       ) : null}
 
       {stream.codec !== '' && stream.codec !== 'copy' ? (
         <OptionSection
-          label={`${stream.codec} 参数`}
+          label={t('builder.stream.options', { codec: stream.codec })}
           target="encoder"
           name={stream.codec}
           values={stream.options}
@@ -253,6 +250,7 @@ interface CliOptionsProps {
  * 「附加参数」手写；现在它们是这里的一行。
  */
 function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
+  const { t } = useI18n();
   const [search, setSearch] = useState('');
   const query = useDebounced(search, 150).trim().toLowerCase();
 
@@ -278,7 +276,7 @@ function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
   if (!cliHelp) {
     return (
       <section className={styles.section}>
-        <Spinner label="正在读取 ffmpeg 的命令行选项" />
+        <Spinner label={t('builder.cli.loading')} />
       </section>
     );
   }
@@ -286,27 +284,33 @@ function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
   return (
     <section className={styles.section}>
       <header className={styles.sectionHead}>
-        <h3 className={styles.sectionTitle}>命令行选项</h3>
+        <h3 className={styles.sectionTitle}>{t('builder.cli.title')}</h3>
         <span className={styles.sectionMeta}>
-          ffmpeg -h {cliHelp.level || '（默认档）'} · {enabled} 项已启用
+          {t('builder.cli.summary', {
+            level: cliHelp.level || t('builder.cli.defaultLevel'),
+            count: enabled,
+          })}
         </span>
       </header>
 
       <TextInput
         type="search"
         value={search}
-        placeholder="搜索选项名或说明"
-        aria-label="搜索命令行选项"
+        placeholder={t('builder.cli.search')}
+        aria-label={t('builder.cli.search.aria')}
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      {sections.length === 0 ? <p className={styles.sectionMeta}>没有匹配的选项。</p> : null}
+      {sections.length === 0 ? <p className={styles.sectionMeta}>{t('builder.cli.noMatch')}</p> : null}
 
       {sections.map((section) => (
         <details className={styles.cliSection} key={section.name} open={query !== ''}>
           <summary className={styles.cliSummary}>
+            {/* 分节名是 ffmpeg 的原文标题，保持它自己的语言。 */}
             <span className={styles.cliName}>{section.name}</span>
-            <span className={styles.cliMeta}>{section.options.length} 项</span>
+            <span className={styles.cliMeta}>
+              {t('builder.cli.sectionCount', { count: section.options.length })}
+            </span>
           </summary>
           <ul className={styles.options}>
             {section.options.map((option) => (
@@ -370,6 +374,7 @@ interface CliOptionRowProps {
  * 两者都是 ffmpeg 的语法本身，程序只负责把选择权交出来。
  */
 function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowProps) {
+  const { t } = useI18n();
   const enabled = value !== undefined;
   const takesValue = option.takesValue === true;
   const position = value?.position ?? defaultPosition(section.scope);
@@ -397,17 +402,17 @@ function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowP
           <Select
             className={styles.position}
             value={spec}
-            aria-label={`-${option.name} 作用的流`}
+            aria-label={t('builder.cli.spec.aria', { name: option.name })}
             onChange={(event) =>
               onChange(
                 patch({ spec: event.target.value === '' ? undefined : event.target.value }),
               )
             }
           >
-            <option value="">全部流</option>
+            <option value="">{t('builder.cli.spec.all')}</option>
             {specs.map((item) => (
               <option key={item.spec} value={item.spec}>
-                {MEDIA_LABEL[item.media] ?? item.media}
+                {MEDIA_KEY[item.media] ? t(MEDIA_KEY[item.media]) : item.media}
               </option>
             ))}
           </Select>
@@ -416,17 +421,18 @@ function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowP
           <Select
             className={styles.position}
             value={position}
-            aria-label={`-${option.name} 的插入位置`}
+            aria-label={t('builder.cli.position.aria', { name: option.name })}
             onChange={(event) => onChange(patch({ position: event.target.value as CliPosition }))}
           >
-            <option value="input">放在输入侧</option>
-            <option value="output">放在输出侧</option>
+            <option value="input">{t('builder.cli.position.input')}</option>
+            <option value="output">{t('builder.cli.position.output')}</option>
           </Select>
         ) : null}
       </div>
 
       {takesValue ? (
         <>
+          {/* 说明文字来自 ffmpeg -h，是它自己的英文原文。 */}
           {option.description ? <p className={styles.desc}>{option.description}</p> : null}
           <TextInput
             value={value?.value ?? ''}
@@ -460,6 +466,7 @@ interface OptionSectionProps {
 }
 
 function OptionSection({ label, target, name, values, onChange }: OptionSectionProps) {
+  const { t } = useI18n();
   const [search, setSearch] = useState('');
   const query = useDebounced(search, 150).trim().toLowerCase();
   const help = useAsync(() => api.help(target, name), [target, name]);
@@ -490,13 +497,14 @@ function OptionSection({ label, target, name, values, onChange }: OptionSectionP
       <header className={styles.sectionHead}>
         <h3 className={styles.sectionTitle}>{label}</h3>
         <span className={styles.sectionMeta}>
-          {help.loading ? '读取中…' : `${options.length} 个可调参数`}
+          {help.loading ? t('common.reading') : t('builder.options.count', { count: options.length })}
         </span>
       </header>
 
       {help.error ? <ErrorNote>{help.error}</ErrorNote> : null}
+      {/* ffmpeg 自己的抱怨照原样展示。 */}
       {help.data?.error ? <ErrorNote>{help.data.error}</ErrorNote> : null}
-      {help.loading ? <Spinner label="读取 ffmpeg -h" /> : null}
+      {help.loading ? <Spinner label={t('catalog.help.loading')} /> : null}
 
       {assigned.length > 0 ? (
         <ul className={styles.chips}>
@@ -505,7 +513,7 @@ function OptionSection({ label, target, name, values, onChange }: OptionSectionP
               <button
                 type="button"
                 className={styles.chip}
-                title="点击清除"
+                title={t('builder.options.chip.clear')}
                 onClick={() => setValue(optionName, '')}
               >
                 <span className={styles.chipKey}>{optionName}</span>
@@ -520,13 +528,13 @@ function OptionSection({ label, target, name, values, onChange }: OptionSectionP
       <TextInput
         type="search"
         value={search}
-        placeholder="搜索参数名或说明"
-        aria-label={`搜索 ${label}`}
+        placeholder={t('builder.options.search')}
+        aria-label={t('builder.options.search.aria', { label })}
         onChange={(event) => setSearch(event.target.value)}
       />
 
       {!help.loading && filtered.length === 0 ? (
-        <p className={styles.sectionMeta}>没有匹配的参数。</p>
+        <p className={styles.sectionMeta}>{t('builder.options.noMatch')}</p>
       ) : null}
 
       <ul className={styles.options}>
@@ -553,6 +561,7 @@ interface OptionRowProps {
 }
 
 function OptionRow({ option, value, onChange }: OptionRowProps) {
+  const { t } = useI18n();
   const id = `opt-${option.name}`;
   const set = value !== '';
 
@@ -563,18 +572,21 @@ function OptionRow({ option, value, onChange }: OptionRowProps) {
           -{option.name}
         </label>
         {option.type ? <span className={styles.type}>{option.type}</span> : null}
-        {option.runtime ? <span className={styles.tag}>运行时</span> : null}
+        {option.runtime ? <span className={styles.tag}>{t('common.runtime')}</span> : null}
       </div>
 
+      {/* 说明文字来自 ffmpeg -h，是它自己的英文原文。 */}
       {option.description ? <p className={styles.desc}>{option.description}</p> : null}
 
       <OptionControl id={id} option={option} value={value} onChange={onChange} />
 
       {option.hasDefault || option.range ? (
         <p className={styles.facts}>
-          {option.hasDefault ? <span>默认 {option.default || '（空）'}</span> : null}
-          {option.range ? <span>范围 {option.range}</span> : null}
-          {option.unit ? <span>单位 {option.unit}</span> : null}
+          {option.hasDefault ? (
+            <span>{t('option.default', { value: option.default || t('common.empty') })}</span>
+          ) : null}
+          {option.range ? <span>{t('option.range', { value: option.range })}</span> : null}
+          {option.unit ? <span>{t('option.unit', { value: option.unit })}</span> : null}
         </p>
       ) : null}
     </div>
@@ -593,12 +605,13 @@ function OptionControl({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const { t } = useI18n();
   const values = option.values ?? [];
 
   if (values.length > 0) {
     return (
       <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">（使用默认）</option>
+        <option value="">{t('option.useDefault')}</option>
         {values.map((item) => (
           <option key={`${item.name}-${item.value ?? ''}`} value={item.value ?? item.name}>
             {item.name}
@@ -613,7 +626,7 @@ function OptionControl({
   if (option.type === 'boolean') {
     return (
       <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">（使用默认）</option>
+        <option value="">{t('option.useDefault')}</option>
         <option value="true">true</option>
         <option value="false">false</option>
       </Select>

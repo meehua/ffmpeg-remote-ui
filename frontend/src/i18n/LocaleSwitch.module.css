@@ -1,0 +1,24 @@
+/* 顶栏里的语言选择器：和 Badge 并排，所以刻意做得同样矮、同样淡。 */
+.switch {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  padding-block: 0.125rem;
+  padding-inline: var(--gap-2xs) var(--gap-xs);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.switch:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

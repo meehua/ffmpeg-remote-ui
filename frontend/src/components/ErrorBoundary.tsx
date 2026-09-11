@@ -1,15 +1,21 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
+import { useI18n, type I18n } from '../i18n/LocaleProvider';
 import { ErrorNote } from './Display';
 
 interface ErrorBoundaryProps {
-  /** 出错提示里用它指明是哪一块坏了。 */
-  label: string;
+  /** 出错提示里用它指明是哪一块坏了。传文案 key，由当前语言渲染。 */
+  scopeKey: string;
   children: ReactNode;
 }
 
 interface ErrorBoundaryState {
   error: Error | null;
+}
+
+/** 类组件拿不到 hook，所以翻译函数随 props 注入（见下面的包装）。 */
+interface BoundaryProps extends ErrorBoundaryProps {
+  i18n: I18n;
 }
 
 /**
@@ -21,7 +27,7 @@ interface ErrorBoundaryState {
  *
  * 它刻意不自动重试：渲染错误通常来自数据本身，重试只会把同一份数据再喂一遍。
  */
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class Boundary extends Component<BoundaryProps, ErrorBoundaryState> {
   override state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
@@ -30,7 +36,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // 控制台留全量信息：组件栈比一句 message 有用得多。
-    console.error(`[${this.props.label}] 渲染出错：`, error, info);
+    console.error(this.props.i18n.t('app.boundary.console', { scope: this.scope() }), error, info);
+  }
+
+  /** 出错的区块名，按当前语言渲染。 */
+  private scope(): string {
+    return this.props.i18n.t(this.props.scopeKey);
   }
 
   override render() {
@@ -40,8 +51,21 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
     return (
       <ErrorNote>
-        {`${this.props.label}渲染出错了：${error.message}（控制台里有完整的组件栈）`}
+        {this.props.i18n.t('app.boundary.title', {
+          scope: this.scope(),
+          message: error.message,
+        })}
       </ErrorNote>
     );
   }
+}
+
+/** 渲染错误的兜底；语言取自最近的 LocaleProvider。 */
+export function ErrorBoundary({ scopeKey, children }: ErrorBoundaryProps) {
+  const i18n = useI18n();
+  return (
+    <Boundary scopeKey={scopeKey} i18n={i18n}>
+      {children}
+    </Boundary>
+  );
 }

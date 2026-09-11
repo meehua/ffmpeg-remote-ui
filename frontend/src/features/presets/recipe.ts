@@ -1,17 +1,7 @@
-/**
- * 预设配方：界面状态里真正可以复用的那部分。
- *
- * 结构由前端定义并带版本号，后端（internal/preset）只把它原样存进
- * <配置目录>/presets/<名字>.json。这样一来，界面加一个字段、调一次结构，
- * 都不需要后端跟着发版；预设文件也始终是干净、可读、能手工编辑的 JSON。
- *
- * 配方里的 settings 是**整个**转码设置——既包含每类流的编码器与参数，也包含
- * 命令行选项。所以「这一套我调好了」可以整套存下来：把常用的组合存成预设，
- * 比在界面上翻找每个选项省事得多。
- */
-
-import { normalizeSettings, type EncodeSettings } from '../workspace/args';
+import type { MessageKey } from '../../i18n';
+import type { Params } from '../../i18n/types';
 import { isRecord } from '../../utils/format';
+import { normalizeSettings, type EncodeSettings } from '../workspace/args';
 
 /**
  * 配方的结构版本。
@@ -86,14 +76,25 @@ export function decodeRecipe(raw: unknown): Recipe | undefined {
   return recipe;
 }
 
-/** 判断一份存档/配方数据是否可用，供界面给出准确的提示。 */
-export function describeRecipeFailure(raw: unknown): string {
+/**
+ * 配方用不了的原因。
+ *
+ * 这里只给出文案 key 与插值参数，不返回成句的文字：本模块是纯数据层，
+ * 该用哪种语言说话由界面决定。
+ */
+export interface RecipeProblem {
+  key: MessageKey;
+  params?: Params;
+}
+
+/** 判断一份存档/配方数据为什么用不了，供界面给出准确的提示。 */
+export function describeRecipeFailure(raw: unknown): RecipeProblem {
   if (!isRecord(raw)) {
-    return '预设内容不是一个 JSON 对象';
+    return { key: 'preset.recipe.notObject' };
   }
   const version = typeof raw.version === 'number' ? raw.version : RECIPE_VERSION;
   if (version > RECIPE_VERSION) {
-    return `预设的格式版本是 ${version}，当前界面只认识 ${RECIPE_VERSION}`;
+    return { key: 'preset.recipe.version', params: { version, supported: RECIPE_VERSION } };
   }
-  return '预设内容无法识别';
+  return { key: 'preset.recipe.unrecognized' };
 }

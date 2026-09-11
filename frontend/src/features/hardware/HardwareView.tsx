@@ -1,6 +1,7 @@
 import type { HardwareInfo, Snapshot } from '../../api/types';
 import { Badge, DataList, EmptyState } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
+import { useI18n } from '../../i18n/LocaleProvider';
 import styles from './HardwareView.module.css';
 
 interface HardwareViewProps {
@@ -10,21 +11,16 @@ interface HardwareViewProps {
 
 /** 硬件页：只陈列服务器实际报告的东西，不做能力推断。 */
 export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
+  const { t, formatDate } = useI18n();
   const devices = hardware?.devices ?? [];
 
   return (
     <Panes columns={2}>
-      <Pane
-        title="DRM 设备"
-        description="来自 /dev/dri 与 sysfs 的真实节点；程序不会依据型号推断任何编码能力。"
-      >
+      <Pane title={t('hw.drm.title')} description={t('hw.drm.description')}>
         {hardware === null ? (
-          <EmptyState title="正在读取设备" />
+          <EmptyState title={t('hw.drm.loading')} />
         ) : devices.length === 0 ? (
-          <EmptyState
-            title="没有发现 render node"
-            hint="容器里通常看不到宿主机的 /dev/dri；在裸机 NAS 上这里会列出 renderD128 等节点。"
-          />
+          <EmptyState title={t('hw.drm.empty.title')} hint={t('hw.drm.empty.hint')} />
         ) : (
           <ul className={styles.devices}>
             {devices.map((device) => (
@@ -40,19 +36,22 @@ export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
                 <DataList
                   dense
                   items={[
-                    { label: '型号', value: device.deviceName || '—' },
-                    { label: '厂商', value: device.vendorName || '—' },
-                    { label: 'render node', value: device.renderNode ?? '—' },
-                    { label: 'card node', value: device.cardNode ?? '—' },
-                    { label: 'PCI', value: device.pciAddress ?? '—' },
-                    { label: 'vendor / device id', value: `${device.vendor ?? '—'} / ${device.deviceId ?? '—'}` },
-                    { label: 'sysfs', value: device.sysfsPath ?? '—' },
+                    { label: t('hw.field.model'), value: device.deviceName || '—' },
+                    { label: t('hw.field.vendor'), value: device.vendorName || '—' },
+                    { label: t('hw.field.renderNode'), value: device.renderNode ?? '—' },
+                    { label: t('hw.field.cardNode'), value: device.cardNode ?? '—' },
+                    { label: t('hw.field.pci'), value: device.pciAddress ?? '—' },
+                    {
+                      label: t('hw.field.ids'),
+                      value: `${device.vendor ?? '—'} / ${device.deviceId ?? '—'}`,
+                    },
+                    { label: t('hw.field.sysfs'), value: device.sysfsPath ?? '—' },
                   ]}
                 />
 
                 {device.properties && Object.keys(device.properties).length > 0 ? (
                   <details className={styles.raw}>
-                    <summary className={styles.rawSummary}>uevent 原始内容</summary>
+                    <summary className={styles.rawSummary}>{t('hw.raw.uevent')}</summary>
                     <pre className={styles.pre}>
                       {Object.entries(device.properties)
                         .map(([key, value]) => `${key}=${value}`)
@@ -66,17 +65,14 @@ export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
         )}
       </Pane>
 
-      <Pane
-        title="FFmpeg 与加速方法"
-        description="硬件加速方法来自 ffmpeg -hwaccels，是否真正可用取决于驱动与设备权限。"
-      >
+      <Pane title={t('hw.accel.title')} description={t('hw.accel.description')}>
         {snapshot === null ? (
-          <EmptyState title="正在读取 FFmpeg 能力" />
+          <EmptyState title={t('hw.accel.loading')} />
         ) : (
           <>
             <div className={styles.chips}>
               {snapshot.hwaccels.length === 0 ? (
-                <span className={styles.muted}>这个 ffmpeg 没有报告任何硬件加速方法。</span>
+                <span className={styles.muted}>{t('hw.accel.empty')}</span>
               ) : (
                 snapshot.hwaccels.map((item) => (
                   <Badge tone="accent" mono key={item}>
@@ -88,24 +84,28 @@ export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
 
             <DataList
               items={[
-                { label: '操作系统', value: hardware ? `${hardware.os} / ${hardware.arch}` : '—' },
-                { label: 'FFmpeg', value: snapshot.ffmpegPath },
-                { label: 'FFprobe', value: snapshot.ffprobePath },
-                { label: '版本', value: snapshot.version },
-                { label: '查询时间', value: new Date(snapshot.generatedAt).toLocaleString() },
                 {
-                  label: '编码器 / 解码器',
+                  label: t('hw.meta.os'),
+                  value: hardware ? `${hardware.os} / ${hardware.arch}` : '—',
+                },
+                { label: t('hw.meta.ffmpeg'), value: snapshot.ffmpegPath },
+                { label: t('hw.meta.ffprobe'), value: snapshot.ffprobePath },
+                { label: t('hw.meta.version'), value: snapshot.version },
+                // 时刻按当前语言格式化，跟界面其余部分保持一致。
+                { label: t('hw.meta.queriedAt'), value: formatDate(snapshot.generatedAt) },
+                {
+                  label: t('hw.meta.codecs'),
                   value: `${snapshot.encoders.length} / ${snapshot.decoders.length}`,
                 },
                 {
-                  label: '滤镜 / 格式',
+                  label: t('hw.meta.filters'),
                   value: `${snapshot.filters.length} / ${snapshot.formats.length}`,
                 },
               ]}
             />
 
             <details className={styles.raw}>
-              <summary className={styles.rawSummary}>ffmpeg -version 原始输出</summary>
+              <summary className={styles.rawSummary}>{t('hw.raw.version')}</summary>
               <pre className={styles.pre}>{snapshot.buildConfig}</pre>
             </details>
           </>

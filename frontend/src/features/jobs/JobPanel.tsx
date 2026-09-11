@@ -4,6 +4,8 @@ import { api } from '../../api/client';
 import type { Job, JobStatus, LogLine } from '../../api/types';
 import { Button, ButtonRow } from '../../components/Controls';
 import { Badge, CopyButton, EmptyState, ErrorNote, ProgressBar } from '../../components/Display';
+import type { MessageKey } from '../../i18n';
+import { useI18n } from '../../i18n/LocaleProvider';
 import { baseName, formatBytes } from '../../utils/format';
 import styles from './JobPanel.module.css';
 
@@ -15,12 +17,12 @@ const TONE: Record<JobStatus, 'neutral' | 'accent' | 'ok' | 'warn' | 'danger'> =
   cancelled: 'warn',
 };
 
-const LABEL: Record<JobStatus, string> = {
-  queued: '排队中',
-  running: '运行中',
-  done: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
+const STATUS_KEY: Record<JobStatus, MessageKey> = {
+  queued: 'job.status.queued',
+  running: 'job.status.running',
+  done: 'job.status.done',
+  failed: 'job.status.failed',
+  cancelled: 'job.status.cancelled',
 };
 
 interface JobPanelProps {
@@ -30,6 +32,7 @@ interface JobPanelProps {
 
 /** 任务列表：状态、进度、操作与日志。工作区与批处理共用。 */
 export function JobPanel({ jobs, logs }: JobPanelProps) {
+  const { t, has } = useI18n();
   const [openId, setOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,12 +50,7 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
   };
 
   if (jobs.length === 0) {
-    return (
-      <EmptyState
-        title="队列是空的"
-        hint="配置好输入与输出后加入队列，任务会实时出现在这里，进度由服务器推送。"
-      />
-    );
+    return <EmptyState title={t('job.empty.title')} hint={t('job.empty.hint')} />;
   }
 
   return (
@@ -64,6 +62,9 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
         const open = openId === job.id;
         const busy = busyId === job.id;
         const active = job.status === 'running' || job.status === 'queued';
+        // 阶段码由服务器上报（见 internal/queue）；表里没有就照原样显示，
+        // 免得新版服务器加了阶段、旧界面反而什么都不显示。
+        const phaseKey = `job.phase.${job.phase ?? ''}`;
 
         return (
           <article key={job.id} className={styles.job}>
@@ -79,7 +80,7 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
                   {baseName(job.output)}
                 </span>
               </p>
-              <Badge tone={TONE[job.status]}>{LABEL[job.status]}</Badge>
+              <Badge tone={TONE[job.status]}>{t(STATUS_KEY[job.status])}</Badge>
             </header>
 
             {job.status === 'running' ? (
@@ -88,7 +89,7 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
                     此时显示流动的「进行中」，比一个停在 0% 的进度条诚实。 */}
                 <ProgressBar value={job.progress} indeterminate={job.progress <= 0} />
                 <span className={styles.metric}>
-                  {job.progress > 0 ? `${job.progress.toFixed(1)}%` : '进行中'}
+                  {job.progress > 0 ? `${job.progress.toFixed(1)}%` : t('job.progress.indeterminate')}
                 </span>
                 {job.speed ? <span className={styles.metric}>{job.speed}</span> : null}
                 {job.bitrate ? <span className={styles.metric}>{job.bitrate}</span> : null}
@@ -96,13 +97,15 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
             ) : null}
 
             {job.status === 'queued' && job.position > 0 ? (
-              <p className={styles.meta}>排队位置 {job.position}</p>
+              <p className={styles.meta}>{t('job.position', { position: job.position })}</p>
             ) : null}
 
-            {job.status === 'running' && job.phase ? <p className={styles.meta}>{job.phase}</p> : null}
+            {job.status === 'running' && job.phase ? (
+              <p className={styles.meta}>{has(phaseKey) ? t(phaseKey) : job.phase}</p>
+            ) : null}
 
             {job.totalSize && job.totalSize > 0 ? (
-              <p className={styles.meta}>已写出 {formatBytes(job.totalSize)}</p>
+              <p className={styles.meta}>{t('job.written', { size: formatBytes(job.totalSize) })}</p>
             ) : null}
 
             <p className={styles.command} title={job.command}>
@@ -113,16 +116,26 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
 
             <ButtonRow>
               {active ? (
-                <Button compact variant="danger" disabled={busy} onClick={() => act(job.id, () => api.cancelJob(job.id))}>
-                  取消
+                <Button
+                  compact
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => act(job.id, () => api.cancelJob(job.id))}
+                >
+                  {t('common.cancel')}
                 </Button>
               ) : (
                 <>
                   <Button compact disabled={busy} onClick={() => act(job.id, () => api.retryJob(job.id))}>
-                    重试
+                    {t('common.retry')}
                   </Button>
-                  <Button compact variant="ghost" disabled={busy} onClick={() => act(job.id, () => api.deleteJob(job.id))}>
-                    删除
+                  <Button
+                    compact
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => act(job.id, () => api.deleteJob(job.id))}
+                  >
+                    {t('common.delete')}
                   </Button>
                 </>
               )}
@@ -133,15 +146,17 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : job.id)}
               >
-                {open ? '收起日志' : `日志 (${lines.length})`}
+                {open ? t('job.logs.hide') : t('job.logs.show', { count: lines.length })}
               </Button>
 
-              <CopyButton compact text={job.command} label="复制命令" />
+              <CopyButton compact text={job.command} label={t('job.copyCommand')} />
             </ButtonRow>
 
             {open ? (
               <pre className={styles.log}>
-                {lines.length > 0 ? lines.map((line) => line.line).join('\n') : '（暂时没有输出）'}
+                {lines.length > 0
+                  ? lines.map((line) => line.line).join('\n')
+                  : t('job.log.empty')}
               </pre>
             ) : null}
           </article>

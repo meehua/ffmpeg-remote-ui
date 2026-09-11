@@ -10,16 +10,19 @@ import { HardwareView } from './features/hardware/HardwareView';
 import { WorkspaceView } from './features/workspace/WorkspaceView';
 import { useAsync } from './hooks/useAsync';
 import { useJobStream } from './hooks/useJobStream';
+import type { MessageKey } from './i18n';
+import { useI18n, type I18n } from './i18n/LocaleProvider';
+import { LocaleSwitch } from './i18n/LocaleSwitch';
 import { cx } from './utils/format';
 import styles from './App.module.css';
 
 type SectionId = 'workspace' | 'batch' | 'catalog' | 'hardware';
 
-const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; hint: string }> = [
-  { id: 'workspace', label: '工作区', hint: '配置并执行一次转码' },
-  { id: 'batch', label: '批处理', hint: '多个文件套用同一组参数' },
-  { id: 'catalog', label: '能力', hint: '服务器 FFmpeg 的全部能力' },
-  { id: 'hardware', label: '硬件', hint: 'DRM 设备与加速方法' },
+const SECTIONS: ReadonlyArray<{ id: SectionId; labelKey: MessageKey; hintKey: MessageKey }> = [
+  { id: 'workspace', labelKey: 'app.nav.workspace', hintKey: 'app.nav.workspace.hint' },
+  { id: 'batch', labelKey: 'app.nav.batch', hintKey: 'app.nav.batch.hint' },
+  { id: 'catalog', labelKey: 'app.nav.catalog', hintKey: 'app.nav.catalog.hint' },
+  { id: 'hardware', labelKey: 'app.nav.hardware', hintKey: 'app.nav.hardware.hint' },
 ];
 
 /**
@@ -29,6 +32,7 @@ const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; hint: string }> = 
  * FFmpeg 能力快照与任务列表，因此切换页面不会重新查询服务器。
  */
 export function App() {
+  const { t } = useI18n();
   const [section, setSection] = useState<SectionId>('workspace');
 
   const snapshot = useAsync(() => api.snapshot(), []);
@@ -56,12 +60,12 @@ export function App() {
         <div className={styles.brand}>
           <span className={styles.mark} aria-hidden="true" />
           <span className={styles.brandText}>
-            <span className={styles.brandName}>FFmpeg Remote UI</span>
-            <span className={styles.brandMeta}>{shortVersion ?? '正在读取服务器能力…'}</span>
+            <span className={styles.brandName}>{t('app.brand')}</span>
+            <span className={styles.brandMeta}>{shortVersion ?? t('app.brand.loading')}</span>
           </span>
         </div>
 
-        <nav className={styles.nav} aria-label="功能域">
+        <nav className={styles.nav} aria-label={t('app.nav.label')}>
           {SECTIONS.map((item) => (
             <button
               key={item.id}
@@ -70,16 +74,21 @@ export function App() {
               aria-current={section === item.id ? 'page' : undefined}
               onClick={() => setSection(item.id)}
             >
-              <span className={styles.navLabel}>{item.label}</span>
-              <span className={styles.navHint}>{item.hint}</span>
+              <span className={styles.navLabel}>{t(item.labelKey)}</span>
+              <span className={styles.navHint}>{t(item.hintKey)}</span>
             </button>
           ))}
         </nav>
 
         <div className={styles.status}>
-          <Badge tone={connected ? 'ok' : 'warn'}>{connected ? '已连接' : '事件流断开'}</Badge>
-          {active > 0 ? <Badge tone="accent">{active} 个进行中</Badge> : null}
-          {hardware.data ? <Badge>{hardware.data.devices?.length ?? 0} 个 DRM 设备</Badge> : null}
+          <Badge tone={connected ? 'ok' : 'warn'}>
+            {connected ? t('app.status.connected') : t('app.status.disconnected')}
+          </Badge>
+          {active > 0 ? <Badge tone="accent">{t('app.status.active', { count: active })}</Badge> : null}
+          {hardware.data ? (
+            <Badge>{t('app.status.devices', { count: hardware.data.devices?.length ?? 0 })}</Badge>
+          ) : null}
+          <LocaleSwitch />
         </div>
       </header>
 
@@ -98,7 +107,7 @@ export function App() {
 
         {/* 功能域各自兜底：某一页渲染出错时，侧栏与顶栏还在，用户能切走继续用别的。 */}
         <div className={styles.viewport}>
-          <ErrorBoundary label="这个功能域">
+          <ErrorBoundary scopeKey="app.boundary.scope.view">
             {section === 'workspace' ? (
               <WorkspaceView
                 snapshot={snapshot.data}
@@ -139,29 +148,30 @@ export function App() {
 
 /* ---------------------------------------------------------------- 运行时设置 */
 
-const CONFIG_FIELDS: ReadonlyArray<{ key: keyof RuntimeConfig; label: string }> = [
-  { key: 'httpAddr', label: '监听地址' },
-  { key: 'mediaRoots', label: '媒体目录' },
-  { key: 'ffmpegPath', label: 'ffmpeg' },
-  { key: 'ffprobePath', label: 'ffprobe' },
-  { key: 'maxConcurrentJobs', label: '并发上限' },
+const CONFIG_FIELDS: ReadonlyArray<{ key: keyof RuntimeConfig; labelKey: MessageKey }> = [
+  { key: 'httpAddr', labelKey: 'config.field.httpAddr' },
+  { key: 'mediaRoots', labelKey: 'config.field.mediaRoots' },
+  { key: 'ffmpegPath', labelKey: 'config.field.ffmpegPath' },
+  { key: 'ffprobePath', labelKey: 'config.field.ffprobePath' },
+  { key: 'maxConcurrentJobs', labelKey: 'config.field.maxConcurrentJobs' },
 ];
 
-const SOURCE_LABEL: Record<string, string> = {
-  env: '环境变量',
-  file: '配置文件',
-  default: '默认值',
+/** 后端的 sources 是稳定枚举（见 internal/config），显示文案在这里映射。 */
+const SOURCE_KEY: Record<string, MessageKey> = {
+  env: 'config.source.env',
+  file: 'config.source.file',
+  default: 'config.source.default',
 };
 
-function describeValue(key: keyof RuntimeConfig, values: RuntimeConfig): string {
+function describeValue(key: keyof RuntimeConfig, values: RuntimeConfig, t: I18n['t']): string {
   if (key === 'mediaRoots') {
     // 后端的约定是「列不出东西就给空数组」，但显示设置的面板不该因为一个字段
     // 把整页带走，所以这里再兜一层。
     const roots = values.mediaRoots ?? [];
-    return roots.length > 0 ? roots.join('、') : '未限制';
+    return roots.length > 0 ? roots.join(t('common.listSeparator')) : t('config.value.unlimited');
   }
   const value = values[key];
-  return value === '' ? '（空）' : String(value);
+  return value === '' ? t('common.empty') : String(value);
 }
 
 /**
@@ -172,26 +182,24 @@ function describeValue(key: keyof RuntimeConfig, values: RuntimeConfig): string 
  * 还是默认值决定的，用来回答「我改了文件怎么没生效」这类问题。
  */
 function ConfigNotice({ info }: { info: ConfigInfo }) {
+  const { t } = useI18n();
+
   return (
     <details className={cx(styles.config, info.created && styles.configNew)} open={info.created}>
       <summary className={styles.configSummary}>
-        <span>
-          {info.created
-            ? '已生成初始配置文件，以后直接改它即可（环境变量仍能临时覆盖）'
-            : '运行时设置'}
-        </span>
-        <span className={styles.configPath}>{info.path || '未能确定配置文件位置'}</span>
+        <span>{info.created ? t('config.created') : t('config.title')}</span>
+        <span className={styles.configPath}>{info.path || t('config.path.missing')}</span>
       </summary>
 
       <ul className={styles.configList}>
         {CONFIG_FIELDS.map((field) => (
           <li className={styles.configItem} key={field.key}>
-            <span className={styles.configKey}>{field.label}</span>
-            <span className={styles.configValue} title={describeValue(field.key, info.values)}>
-              {describeValue(field.key, info.values)}
+            <span className={styles.configKey}>{t(field.labelKey)}</span>
+            <span className={styles.configValue} title={describeValue(field.key, info.values, t)}>
+              {describeValue(field.key, info.values, t)}
             </span>
             <span className={styles.configSource}>
-              {SOURCE_LABEL[info.sources?.[field.key] ?? ''] ?? '未知来源'}
+              {t(SOURCE_KEY[info.sources?.[field.key] ?? ''] ?? 'config.source.unknown')}
             </span>
           </li>
         ))}
@@ -202,7 +210,7 @@ function ConfigNotice({ info }: { info: ConfigInfo }) {
       ))}
 
       <p className={styles.configHint}>
-        预设文件也在这个目录下：{info.presetsDir || '（未能确定）'}
+        {t('config.hint.presets', { dir: info.presetsDir || t('config.value.missing') })}
       </p>
     </details>
   );

@@ -7,6 +7,8 @@ import { Badge, DataList, EmptyState, ErrorNote, Spinner } from '../../component
 import { Pane, Panes } from '../../components/Pane';
 import { Tabs } from '../../components/Tabs';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
+import type { MessageKey } from '../../i18n';
+import { useI18n } from '../../i18n/LocaleProvider';
 import styles from './CatalogView.module.css';
 
 type CatalogKey =
@@ -29,27 +31,27 @@ type CategoryKey = CatalogKey | 'hwaccels';
 
 interface Category {
   key: CategoryKey;
-  label: string;
+  labelKey: MessageKey;
   /** 对应的 `ffmpeg -h` 目标；为空表示这类条目没有独立帮助。 */
   target?: string;
 }
 
 const CATEGORIES: ReadonlyArray<Category> = [
-  { key: 'encoders', label: '编码器', target: 'encoder' },
-  { key: 'decoders', label: '解码器', target: 'decoder' },
-  { key: 'filters', label: '滤镜', target: 'filter' },
-  { key: 'muxers', label: '封装', target: 'muxer' },
-  { key: 'demuxers', label: '解封装', target: 'demuxer' },
-  { key: 'bitstreamFilters', label: '码流滤镜', target: 'bsf' },
-  { key: 'protocols', label: '协议', target: 'protocol' },
-  { key: 'devices', label: '设备', target: 'device' },
-  { key: 'hwaccels', label: '硬件加速' },
-  { key: 'pixelFormats', label: '像素格式' },
-  { key: 'sampleFormats', label: '采样格式' },
-  { key: 'layouts', label: '声道布局' },
-  { key: 'colors', label: '颜色名' },
-  { key: 'dispositions', label: '流处置' },
-  { key: 'formats', label: '容器格式' },
+  { key: 'encoders', labelKey: 'catalog.encoders', target: 'encoder' },
+  { key: 'decoders', labelKey: 'catalog.decoders', target: 'decoder' },
+  { key: 'filters', labelKey: 'catalog.filters', target: 'filter' },
+  { key: 'muxers', labelKey: 'catalog.muxers', target: 'muxer' },
+  { key: 'demuxers', labelKey: 'catalog.demuxers', target: 'demuxer' },
+  { key: 'bitstreamFilters', labelKey: 'catalog.bitstreamFilters', target: 'bsf' },
+  { key: 'protocols', labelKey: 'catalog.protocols', target: 'protocol' },
+  { key: 'devices', labelKey: 'catalog.devices', target: 'device' },
+  { key: 'hwaccels', labelKey: 'catalog.hwaccels' },
+  { key: 'pixelFormats', labelKey: 'catalog.pixelFormats' },
+  { key: 'sampleFormats', labelKey: 'catalog.sampleFormats' },
+  { key: 'layouts', labelKey: 'catalog.layouts' },
+  { key: 'colors', labelKey: 'catalog.colors' },
+  { key: 'dispositions', labelKey: 'catalog.dispositions' },
+  { key: 'formats', labelKey: 'catalog.formats' },
 ];
 
 function itemsOf(snapshot: Snapshot, key: CategoryKey): FFItem[] {
@@ -73,6 +75,7 @@ interface CatalogViewProps {
  * 是可验证的，而不是一句口号。
  */
 export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProps) {
+  const { t } = useI18n();
   const [categoryKey, setCategoryKey] = useState<CategoryKey>('encoders');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<{ target: string; name: string } | null>(null);
@@ -97,8 +100,8 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
   if (!snapshot) {
     return (
       <Panes columns={1}>
-        <Pane title="能力" description="等待服务器返回 FFmpeg 能力。">
-          <Spinner label="读取中" />
+        <Pane title={t('catalog.loading.title')} description={t('catalog.loading.description')}>
+          <Spinner label={t('common.reading')} />
         </Pane>
       </Panes>
     );
@@ -107,16 +110,16 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
   return (
     <Panes columns={2}>
       <Pane
-        title="能力清单"
-        description="列表直接来自服务器的 ffmpeg，程序不内置任何能力表。"
+        title={t('catalog.title')}
+        description={t('catalog.description')}
         actions={
           <Button compact variant="ghost" disabled={refreshing} onClick={() => void onRefresh()}>
-            {refreshing ? '重新查询中…' : '重新查询'}
+            {refreshing ? t('catalog.refreshing') : t('catalog.refresh')}
           </Button>
         }
       >
         <Tabs
-          label="能力类别"
+          label={t('catalog.tabs')}
           value={categoryKey}
           onChange={(next) => {
             setCategoryKey(next);
@@ -124,7 +127,7 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
           }}
           items={CATEGORIES.map((item) => ({
             id: item.key,
-            label: item.label,
+            label: t(item.labelKey),
             count: itemsOf(snapshot, item.key).length,
           }))}
         />
@@ -132,17 +135,17 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
         <TextInput
           type="search"
           value={search}
-          placeholder={`在「${category.label}」中搜索`}
-          aria-label="搜索能力"
+          placeholder={t('catalog.search', { label: t(category.labelKey) })}
+          aria-label={t('catalog.search.aria')}
           onChange={(event) => setSearch(event.target.value)}
         />
 
         <p className={styles.count}>
-          {entries.length} / {all.length} 项
+          {t('catalog.count', { shown: entries.length, total: all.length })}
         </p>
 
         {entries.length === 0 ? (
-          <EmptyState title="没有匹配的条目" />
+          <EmptyState title={t('catalog.empty')} />
         ) : (
           <ul className={styles.list}>
             {entries.map((item) => {
@@ -168,16 +171,13 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
         )}
       </Pane>
 
-      <Pane
-        title="条目详情"
-        description="展开自 ffmpeg -h；参数的类型、默认值与取值范围都是 FFmpeg 给出的。"
-      >
+      <Pane title={t('catalog.detail.title')} description={t('catalog.detail.description')}>
         {selected ? (
           <HelpPanel target={selected.target} name={selected.name} />
         ) : (
           <EmptyState
-            title="还没有选中条目"
-            hint="在左侧点一个编码器、滤镜或封装格式，这里会列出它的全部参数。"
+            title={t('catalog.detail.empty.title')}
+            hint={t('catalog.detail.empty.hint')}
           />
         )}
       </Pane>
@@ -188,19 +188,25 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
 /* ---------------------------------------------------------------- 详情 */
 
 function HelpPanel({ target, name }: { target: string; name: string }) {
+  const { t } = useI18n();
   const resource = useAsync(() => api.help(target, name), [target, name]);
   const payload = resource.data;
   const help = payload?.help;
 
   if (resource.loading) {
-    return <Spinner label="读取 ffmpeg -h" />;
+    return <Spinner label={t('catalog.help.loading')} />;
   }
   if (resource.error) {
     return <ErrorNote>{resource.error}</ErrorNote>;
   }
   if (!help) {
-    return <EmptyState title="没有返回内容" />;
+    return <EmptyState title={t('catalog.help.empty')} />;
   }
+
+  // 列表分隔用当前语言的标点（中文顿号 / 英文逗号）。
+  const separator = t('common.listSeparator');
+  const port = (item: { name?: string; media?: string }) =>
+    t('catalog.port', { name: item.name ?? '?', media: item.media ?? t('common.any') });
 
   const facts: Array<{ label: string; value: string }> = [];
   for (const property of help.properties ?? []) {
@@ -208,31 +214,32 @@ function HelpPanel({ target, name }: { target: string; name: string }) {
   }
   if (help.inputs?.length) {
     facts.push({
-      label: '输入端口',
-      value: help.inputs.map((port) => `${port.name ?? '?'}（${port.media ?? '不限'}）`).join('、'),
+      label: t('catalog.fact.inputs'),
+      value: help.inputs.map(port).join(separator),
     });
   }
   if (help.outputs?.length) {
     facts.push({
-      label: '输出端口',
-      value: help.outputs.map((port) => `${port.name ?? '?'}（${port.media ?? '不限'}）`).join('、'),
+      label: t('catalog.fact.outputs'),
+      value: help.outputs.map(port).join(separator),
     });
   }
   if (help.capabilities?.length) {
-    facts.push({ label: '通用能力', value: help.capabilities.join('、') });
+    facts.push({ label: t('catalog.fact.capabilities'), value: help.capabilities.join(separator) });
   }
   if (help.threading?.length) {
-    facts.push({ label: '多线程', value: help.threading.join('、') });
+    facts.push({ label: t('catalog.fact.threading'), value: help.threading.join(separator) });
   }
   if (help.codecs?.length) {
-    facts.push({ label: '支持编解码', value: help.codecs.join('、') });
+    facts.push({ label: t('catalog.fact.codecs'), value: help.codecs.join(separator) });
   }
   if (help.sampleFormats?.length) {
-    facts.push({ label: '采样格式', value: help.sampleFormats.join(' ') });
+    facts.push({ label: t('catalog.fact.sampleFormats'), value: help.sampleFormats.join(' ') });
   }
 
   return (
     <div className={styles.help}>
+      {/* ffmpeg 自己的抱怨照原样展示，那是它的原文，不翻译。 */}
       {payload?.error ? <ErrorNote>{payload.error}</ErrorNote> : null}
 
       <header className={styles.helpHead}>
@@ -245,7 +252,7 @@ function HelpPanel({ target, name }: { target: string; name: string }) {
 
       {help.pixelFormats?.length ? (
         <section className={styles.helpSection}>
-          <h4 className={styles.helpSectionTitle}>支持的像素格式</h4>
+          <h4 className={styles.helpSectionTitle}>{t('catalog.pixelFormats.title')}</h4>
           <div className={styles.chips}>
             {help.pixelFormats.map((format) => (
               <Badge key={format} mono>
@@ -258,9 +265,12 @@ function HelpPanel({ target, name }: { target: string; name: string }) {
 
       {(help.sections ?? []).map((section) => (
         <section className={styles.helpSection} key={section.name}>
+          {/* 分节名是 ffmpeg 的原文标题，保持它自己的语言。 */}
           <h4 className={styles.helpSectionTitle}>
             {section.name}
-            <span className={styles.helpSectionCount}>{section.options.length} 个参数</span>
+            <span className={styles.helpSectionCount}>
+              {t('catalog.section.count', { count: section.options.length })}
+            </span>
           </h4>
           <ul className={styles.optionList}>
             {section.options.map((option) => (
@@ -273,7 +283,7 @@ function HelpPanel({ target, name }: { target: string; name: string }) {
       ))}
 
       <details className={styles.raw}>
-        <summary className={styles.rawSummary}>ffmpeg -h 的原始输出</summary>
+        <summary className={styles.rawSummary}>{t('catalog.help.raw')}</summary>
         <pre className={styles.pre}>{help.raw}</pre>
       </details>
     </div>
@@ -281,19 +291,24 @@ function HelpPanel({ target, name }: { target: string; name: string }) {
 }
 
 function OptionRow({ option }: { option: FFOption }) {
+  const { t } = useI18n();
+
   return (
     <div className={styles.option}>
       <div className={styles.optionHead}>
         <code className={styles.optionName}>-{option.name}</code>
         {option.type ? <span className={styles.optionType}>{option.type}</span> : null}
-        {option.runtime ? <span className={styles.optionType}>运行时</span> : null}
+        {option.runtime ? <span className={styles.optionType}>{t('common.runtime')}</span> : null}
       </div>
+      {/* 说明文字来自 ffmpeg -h，是它自己的英文原文。 */}
       {option.description ? <p className={styles.optionDesc}>{option.description}</p> : null}
       {option.hasDefault || option.range || option.unit ? (
         <p className={styles.optionFacts}>
-          {option.hasDefault ? <span>默认 {option.default || '（空）'}</span> : null}
-          {option.range ? <span>范围 {option.range}</span> : null}
-          {option.unit ? <span>单位 {option.unit}</span> : null}
+          {option.hasDefault ? (
+            <span>{t('option.default', { value: option.default || t('common.empty') })}</span>
+          ) : null}
+          {option.range ? <span>{t('option.range', { value: option.range })}</span> : null}
+          {option.unit ? <span>{t('option.unit', { value: option.unit })}</span> : null}
         </p>
       ) : null}
       {option.values && option.values.length > 0 ? (

@@ -7,6 +7,7 @@ import { EmptyState, ErrorNote } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
 import { useAction, useAsync } from '../../hooks/useAsync';
 import { usePersistentState } from '../../hooks/usePersistentState';
+import { useI18n } from '../../i18n/LocaleProvider';
 import { baseName } from '../../utils/format';
 import { JobPanel } from '../jobs/JobPanel';
 import { PresetBar } from '../presets/PresetBar';
@@ -97,6 +98,7 @@ function uniqueDirs(outputs: string[]): string[] {
 
 /** 批处理：一组输入文件套用同一套参数。 */
 export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewProps) {
+  const { t } = useI18n();
   // 与工作区同理：状态放进浏览器本地存档，来回切换与刷新都不会白填。
   const [inputs, setInputs] = usePersistentState('batch.inputs', '');
   const [outDir, setOutDir] = usePersistentState('batch.outDir', '');
@@ -165,17 +167,18 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
       if (result.files.length > 0) {
         setInputs(result.files.map((file) => file.path).join('\n'));
       }
-      const notes = [`扫到 ${result.files.length} 个文件`];
+      // 每条独立成句，再由分隔符拼起来（英文用空格，中文不用）。
+      const notes = [t('batch.result.found', { count: result.files.length })];
       if (result.skipped > 0) {
-        notes.push(`跳过 ${result.skipped} 个读不了的条目`);
+        notes.push(t('batch.result.skipped', { count: result.skipped }));
       }
       if (result.truncated) {
-        notes.push(`已达到 ${result.limit} 个的上限，还有文件没列出来`);
+        notes.push(t('batch.result.truncated', { limit: result.limit }));
       }
       if (result.files.length === 0) {
-        notes.push('可以放宽扩展名过滤或换一个目录');
+        notes.push(t('batch.result.hint'));
       }
-      setScanNote(`${notes.join('；')}。`);
+      setScanNote(notes.join(t('common.sentenceSeparator')));
     });
   };
 
@@ -195,7 +198,11 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
         done += 1;
       }
     });
-    setReport(ok ? `已加入 ${done} 个任务。` : `已加入 ${done} 个任务后中断。`);
+    setReport(
+      ok
+        ? t('batch.report.done', { count: done })
+        : t('batch.report.interrupted', { count: done }),
+    );
   };
 
   /** 预览里只显示相对输出目录的那一段，长前缀没有信息量。 */
@@ -206,28 +213,23 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
 
   return (
     <Panes columns={2}>
-      <Pane
-        title="待处理文件"
-        description="每行一个服务器上的绝对路径；也可以直接扫描一个目录。"
-      >
-        <Field
-          label="扫描目录"
-          hint="递归收集目录里的文件并填到下面的列表；扩展名过滤留空表示全都收。"
-        >
+      <Pane title={t('batch.title')} description={t('batch.description')}>
+        <Field label={t('batch.scanDir')} hint={t('batch.scanDir.hint')}>
           <div className={styles.scanRow}>
+            {/* 路径示例与语言无关，两种语言下都说得通。 */}
             <TextInput
               value={scanDir}
-              placeholder="/data/media/待转码"
+              placeholder="/data/media/inbox"
               onChange={(event) => setScanDir(event.target.value)}
             />
             <TextInput
               value={scanExts}
               placeholder="mkv, mp4"
-              aria-label="扩展名过滤"
+              aria-label={t('batch.scanExts.aria')}
               onChange={(event) => setScanExts(event.target.value)}
             />
             <Button compact disabled={scanDir.trim() === '' || scan.pending} onClick={runScan}>
-              {scan.pending ? '扫描中…' : '扫描'}
+              {scan.pending ? t('batch.scanning') : t('batch.scan')}
             </Button>
           </div>
         </Field>
@@ -236,7 +238,7 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
 
         <ExtensionPicker target="demuxer" value={scanExts} onChange={setScanExts} />
 
-        <Field label="输入文件（每行一个）">
+        <Field label={t('batch.inputs')}>
           <TextArea
             value={inputs}
             rows={8}
@@ -247,17 +249,17 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
         </Field>
 
         <div className={styles.grid}>
-          <Field label="输出目录" hint="不存在会自动创建">
+          <Field label={t('batch.outDir')} hint={t('batch.outDir.hint')}>
             <TextInput
               value={outDir}
               placeholder="/data/out"
               onChange={(event) => setOutDir(event.target.value)}
             />
           </Field>
-          <Field label="文件名后缀" hint="例如 _x265">
+          <Field label={t('batch.suffix')} hint={t('batch.suffix.hint')}>
             <TextInput value={suffix} onChange={(event) => setSuffix(event.target.value)} />
           </Field>
-          <Field label="输出扩展名" hint="留空保留原扩展名">
+          <Field label={t('batch.ext')} hint={t('batch.ext.hint')}>
             {/* 候选来自 muxer 报的扩展名，用 datalist 挂在输入框上：
                 既能选，也能直接敲一个 ffmpeg 没写进帮助里的写法。 */}
             <TextInput
@@ -275,16 +277,16 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
           ))}
         </datalist>
 
-        <Switch label="在输出目录里还原原目录结构" checked={keepTree} onChange={setKeepTree} />
+        <Switch label={t('batch.keepTree')} checked={keepTree} onChange={setKeepTree} />
         <p className={styles.planHint}>
           {keepTree
             ? scanDir.trim() === ''
-              ? '以「扫描目录」为参照根；它为空时暂时按文件名平铺。'
-              : `子目录按相对「${scanDir.trim()}」的路径还原，扩展名仍由上面的设置决定。`
-            : '所有输出都直接放在输出目录里。'}
+              ? t('batch.keepTree.noRoot')
+              : t('batch.keepTree.root', { root: scanDir.trim() })
+            : t('batch.keepTree.off')}
         </p>
 
-        <Field label="附加参数" hint="原样插在输出文件之前，对这批次里的每个文件都生效。">
+        <Field label={t('batch.extraArgs')} hint={t('batch.extraArgs.hint')}>
           <TextArea
             value={extraArgs}
             rows={3}
@@ -295,17 +297,13 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
         </Field>
 
         <Switch
-          label="覆盖已存在的输出文件（-y）"
+          label={t('common.overwrite')}
           checked={hasOverwrite(settings)}
           onChange={(on) => setSettings(withOverwrite(settings, on))}
         />
       </Pane>
 
-      <Pane
-        title="参数与提交"
-        narrow
-        description="参数与工作区一致：结构来自 ffmpeg 自己的分节。"
-      >
+      <Pane narrow title={t('batch.params.title')} description={t('batch.params.description')}>
         <PresetBar recipe={recipe} onLoad={applyRecipe} />
 
         {snapshot ? (
@@ -317,16 +315,20 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
             onChange={setSettings}
           />
         ) : (
-          <EmptyState title="正在读取 FFmpeg 能力" hint="读取完成后才能选择编码器。" />
+          <EmptyState
+            title={t('workspace.capability.loading')}
+            hint={t('batch.capability.hint')}
+          />
         )}
 
         <div className={styles.plan}>
           <p className={styles.planTitle}>
-            将生成 {plan.length} 个任务
-            {plan.length > PREVIEW_LIMIT ? `（下面只列出前 ${PREVIEW_LIMIT} 个）` : ''}
+            {plan.length > PREVIEW_LIMIT
+              ? t('batch.plan.title.truncated', { count: plan.length, limit: PREVIEW_LIMIT })
+              : t('batch.plan.title', { count: plan.length })}
           </p>
           {plan.length === 0 ? (
-            <p className={styles.planHint}>填入输入文件与输出目录后会在这里列出每个输出路径。</p>
+            <p className={styles.planHint}>{t('batch.plan.empty')}</p>
           ) : (
             <ul className={styles.planList}>
               {plan.slice(0, PREVIEW_LIMIT).map((item) => (
@@ -350,10 +352,10 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
 
         <ButtonRow>
           <Button variant="primary" disabled={!ready || submit.pending} onClick={enqueueAll}>
-            {submit.pending ? '提交中…' : '全部加入队列'}
+            {submit.pending ? t('batch.submitting') : t('batch.submit')}
           </Button>
         </ButtonRow>
-        {ready ? null : <p className={styles.planHint}>需要至少一个输入文件，并填好输出目录。</p>}
+        {ready ? null : <p className={styles.planHint}>{t('batch.notReady')}</p>}
 
         <JobPanel jobs={jobs} logs={logs} />
       </Pane>

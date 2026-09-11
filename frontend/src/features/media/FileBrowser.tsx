@@ -5,6 +5,7 @@ import type { FileEntry } from '../../api/types';
 import { Button, TextInput } from '../../components/Controls';
 import { EmptyState, ErrorNote, Spinner } from '../../components/Display';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
+import { useI18n } from '../../i18n/LocaleProvider';
 import { cx, formatBytes } from '../../utils/format';
 import styles from './FileBrowser.module.css';
 
@@ -28,6 +29,7 @@ interface FileBrowserProps {
  * 进入目录就会把该目录作为选中值上报，因此「挑输出目录」不需要额外的按钮。
  */
 export function FileBrowser({ value, onPick, mode = 'file' }: FileBrowserProps) {
+  const { t } = useI18n();
   const [dir, setDir] = useState('');
   const [search, setSearch] = useState('');
   const query = useDebounced(search, 150).trim().toLowerCase();
@@ -53,30 +55,30 @@ export function FileBrowser({ value, onPick, mode = 'file' }: FileBrowserProps) 
     <div className={styles.browser}>
       <div className={styles.toolbar}>
         <Button compact disabled={!data?.parent} onClick={() => data?.parent && setDir(data.parent)}>
-          ↑ 上一级
+          {t('file.up')}
         </Button>
         <Button compact variant="ghost" disabled={!dir} onClick={() => setDir('')}>
-          根目录
+          {t('file.root')}
         </Button>
       </div>
 
-      <p className={styles.location} title={data?.path || '未选择目录'}>
-        {data?.path || '选择要浏览的位置'}
+      <p className={styles.location} title={data?.path || t('file.location.none')}>
+        {data?.path || t('file.location.pick')}
       </p>
 
       <TextInput
         type="search"
         value={search}
-        placeholder="按名称过滤"
-        aria-label="按名称过滤"
+        placeholder={t('file.filter')}
+        aria-label={t('file.filter')}
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      {resource.loading ? <Spinner label="读取目录" /> : null}
+      {resource.loading ? <Spinner label={t('file.reading')} /> : null}
       {resource.error ? <ErrorNote>{resource.error}</ErrorNote> : null}
 
       {!resource.loading && entries.length === 0 ? (
-        <EmptyState title="这个目录里没有可显示的条目" hint="隐藏文件与子目录之外的内容都会被列出。" />
+        <EmptyState title={t('file.empty.title')} hint={t('file.empty.hint')} />
       ) : null}
 
       <ul className={styles.entries}>

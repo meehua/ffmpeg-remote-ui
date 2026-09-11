@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { Button, Select, TextInput } from '../../components/Controls';
 import { ErrorNote } from '../../components/Display';
 import { useAction, useAsync } from '../../hooks/useAsync';
+import { useI18n } from '../../i18n/LocaleProvider';
 import { decodeRecipe, describeRecipeFailure, encodeRecipe, type Recipe } from './recipe';
 import styles from './PresetBar.module.css';
 
@@ -21,6 +22,7 @@ interface PresetBarProps {
  * 跨设备可用，也能直接手工编辑。这里只做读、写、删三件事。
  */
 export function PresetBar({ recipe, onLoad }: PresetBarProps) {
+  const { t } = useI18n();
   const presets = useAsync(() => api.presets(), []);
   const [selected, setSelected] = useState('');
   const [name, setName] = useState('');
@@ -36,11 +38,12 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
       const record = await api.readPreset(target);
       const parsed = decodeRecipe(record.recipe);
       if (!parsed) {
-        throw new Error(describeRecipeFailure(record.recipe));
+        const problem = describeRecipeFailure(record.recipe);
+        throw new Error(t(problem.key, problem.params));
       }
       onLoad(parsed);
       setName(target);
-      setNote(`已载入「${target}」。`);
+      setNote(t('preset.loaded', { name: target }));
     });
   };
 
@@ -50,7 +53,7 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
     await action.run(async () => {
       await api.savePreset(target, encodeRecipe(recipe));
       setSelected(target);
-      setNote(`已保存「${target}」。`);
+      setNote(t('preset.saved', { name: target }));
       presets.reload();
     });
   };
@@ -58,26 +61,26 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
   const remove = async () => {
     setNote(null);
     const target = selected;
-    if (!window.confirm(`删除预设「${target}」？此操作不可撤销。`)) {
+    if (!window.confirm(t('preset.confirmDelete', { name: target }))) {
       return;
     }
     await action.run(async () => {
       await api.deletePreset(target);
       setSelected('');
-      setNote(`已删除「${target}」。`);
+      setNote(t('preset.deleted', { name: target }));
       presets.reload();
     });
   };
 
   return (
-    <section className={styles.bar} aria-label="预设">
+    <section className={styles.bar} aria-label={t('preset.label')}>
       <div className={styles.row}>
         <Select
           value={selected}
-          aria-label="已有预设"
+          aria-label={t('preset.existing')}
           onChange={(event) => setSelected(event.target.value)}
         >
-          <option value="">{items.length === 0 ? '还没有预设' : '选择一份预设'}</option>
+          <option value="">{items.length === 0 ? t('preset.none') : t('preset.select')}</option>
           {items.map((item) => (
             <option key={item.name} value={item.name}>
               {item.name}
@@ -85,18 +88,18 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
           ))}
         </Select>
         <Button compact onClick={load} disabled={selected === '' || action.pending}>
-          载入
+          {t('common.load')}
         </Button>
         <Button compact variant="danger" onClick={remove} disabled={selected === '' || action.pending}>
-          删除
+          {t('common.delete')}
         </Button>
       </div>
 
       <div className={styles.row}>
         <TextInput
           value={name}
-          placeholder="预设名"
-          aria-label="预设名"
+          placeholder={t('preset.name')}
+          aria-label={t('preset.name')}
           onChange={(event) => setName(event.target.value)}
         />
         <Button
@@ -105,7 +108,7 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
           onClick={save}
           disabled={name.trim() === '' || action.pending}
         >
-          保存
+          {t('common.save')}
         </Button>
       </div>
 
@@ -119,7 +122,7 @@ export function PresetBar({ recipe, onLoad }: PresetBarProps) {
       {note ? <p className={styles.note}>{note}</p> : null}
 
       <p className={styles.hint} title={presets.data?.dir}>
-        预设保存在服务器：{presets.data?.dir ?? '读取中…'}
+        {t('preset.dir', { dir: presets.data?.dir ?? t('common.reading') })}
       </p>
     </section>
   );

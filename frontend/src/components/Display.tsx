@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 
+import { useI18n } from '../i18n/LocaleProvider';
 import { cx } from '../utils/format';
 import { Button } from './Controls';
 import styles from './Display.module.css';
@@ -37,11 +38,12 @@ export function ProgressBar({ value, indeterminate }: ProgressBarProps) {
   );
 }
 
-export function Spinner({ label = '加载中' }: { label?: string }) {
+export function Spinner({ label }: { label?: string }) {
+  const { t } = useI18n();
   return (
     <span className={styles.spinnerWrap} role="status">
       <span className={styles.spinner} aria-hidden="true" />
-      <span className={styles.spinnerLabel}>{label}</span>
+      <span className={styles.spinnerLabel}>{label ?? t('common.loading')}</span>
     </span>
   );
 }
@@ -102,7 +104,8 @@ interface CopyButtonProps {
   disabled?: boolean;
 }
 
-export function CopyButton({ text, label = '复制', compact, disabled }: CopyButtonProps) {
+export function CopyButton({ text, label, compact, disabled }: CopyButtonProps) {
+  const { t } = useI18n();
   const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle');
 
   const copy = async () => {
@@ -116,7 +119,12 @@ export function CopyButton({ text, label = '复制', compact, disabled }: CopyBu
     window.setTimeout(() => setState('idle'), 1800);
   };
 
-  const caption = state === 'done' ? '已复制' : state === 'failed' ? '无法复制' : label;
+  const caption =
+    state === 'done'
+      ? t('common.copied')
+      : state === 'failed'
+        ? t('common.copyFailed')
+        : (label ?? t('common.copy'));
 
   return (
     <Button compact={compact} variant="ghost" onClick={copy} disabled={disabled || text === ''}>

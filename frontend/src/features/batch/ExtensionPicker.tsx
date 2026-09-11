@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { Button, ButtonRow, TextInput } from '../../components/Controls';
 import { ErrorNote, Spinner } from '../../components/Display';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
+import { useI18n } from '../../i18n/LocaleProvider';
 import { cx } from '../../utils/format';
 import styles from './ExtensionPicker.module.css';
 
@@ -36,6 +37,7 @@ interface ExtensionPickerProps {
  * 因此列表里会出现一些冷门扩展名，配合搜索用就好。
  */
 export function ExtensionPicker({ target, value, onChange }: ExtensionPickerProps) {
+  const { t } = useI18n();
   const list = useAsync(() => api.extensions(target), [target]);
   const [search, setSearch] = useState('');
   const query = useDebounced(search, 150).trim().toLowerCase();
@@ -57,28 +59,29 @@ export function ExtensionPicker({ target, value, onChange }: ExtensionPickerProp
   return (
     <details className={styles.picker}>
       <summary className={styles.summary}>
-        <span>{target === 'demuxer' ? '从 ffmpeg 选择输入扩展名' : '从 ffmpeg 选择输出扩展名'}</span>
+        <span>{target === 'demuxer' ? t('ext.summary.input') : t('ext.summary.output')}</span>
         <span className={styles.meta}>
-          {list.loading ? '读取中…' : `已选 ${selected.size} / ${all.length}`}
+          {list.loading
+            ? t('common.reading')
+            : t('ext.selected', { selected: selected.size, total: all.length })}
         </span>
       </summary>
 
       <div className={styles.body}>
         {list.error ? <ErrorNote>{list.error}</ErrorNote> : null}
-        {list.loading ? <Spinner label="汇总 ffmpeg 报告的扩展名" /> : null}
+        {list.loading ? <Spinner label={t('ext.loading')} /> : null}
 
         {all.length > 0 ? (
           <>
             <p className={styles.note}>
-              列表来自 ffmpeg 在 {target} 帮助里写的 Common extensions。
-              「全部」只勾选当前筛选出来的 {visible.length} 个，不会把整张表一次性选中。
+              {t('ext.note', { target, visible: visible.length })}
             </p>
 
             <TextInput
               type="search"
               value={search}
-              placeholder="筛选扩展名"
-              aria-label="筛选扩展名"
+              placeholder={t('ext.filter')}
+              aria-label={t('ext.filter')}
               onChange={(event) => setSearch(event.target.value)}
             />
 
@@ -88,10 +91,10 @@ export function ExtensionPicker({ target, value, onChange }: ExtensionPickerProp
                 disabled={visible.length === 0}
                 onClick={() => onChange(joinExtensions([...selected, ...visible]))}
               >
-                全部（勾选当前 {visible.length} 个）
+                {t('ext.selectAll', { visible: visible.length })}
               </Button>
               <Button compact variant="ghost" onClick={() => onChange('')}>
-                清空
+                {t('ext.clear')}
               </Button>
             </ButtonRow>
 
