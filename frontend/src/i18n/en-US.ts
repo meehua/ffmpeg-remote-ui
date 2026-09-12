@@ -30,6 +30,8 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'app.boundary.scope.view': 'This section',
   'app.boundary.title': '{scope} failed to render: {message} (the console has the full component stack)',
   'app.boundary.console': '[{scope}] render error:',
+  /* Accessible name of the panel switcher shown in the folded layout. */
+  'panes.switcher': 'Panels',
 
   /* ----------------------------------------------------------- Language */
   'locale.label': 'Language',

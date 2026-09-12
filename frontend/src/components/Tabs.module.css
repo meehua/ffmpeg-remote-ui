@@ -1,4 +1,4 @@
-/* 分类切换条：窄屏时可以横向滚动，不挤压主内容。 */
+/* 切换条：所在容器窄了就横向滚动，不把按钮挤成好几行。 */
 .tabs {
   display: flex;
   flex-wrap: wrap;
@@ -8,7 +8,12 @@
   background: var(--surface-sunken);
 }
 
-@media (max-width: 34rem) {
+/*
+ * 这里要跟的是「这一栏有多宽」，而不是整个视口有多宽——同一个页面在宽视口里也可能
+ * 被分成窄栏（分栏判定见 components/Pane.tsx）。所以用容器查询，容器由使用方声明
+ * （CatalogView 的 .tabBar、Pane 的 .switcher）。
+ */
+@container (max-width: 34rem) {
   .tabs {
     flex-wrap: nowrap;
     overflow-inline: auto;

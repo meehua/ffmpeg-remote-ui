@@ -32,6 +32,8 @@ export const zhCN = {
   'app.boundary.scope.view': '这个功能域',
   'app.boundary.title': '{scope}渲染出错了：{message}（控制台里有完整的组件栈）',
   'app.boundary.console': '[{scope}] 渲染出错：',
+  /* 折叠形态下，模块之间那条切换条的读屏器名称。 */
+  'panes.switcher': '内容模块',
 
   /* -------------------------------------------------------------- 语言 */
   'locale.label': '语言',

@@ -1,9 +1,12 @@
+import type { ReactNode } from 'react';
+
 import { cx } from '../utils/format';
 import styles from './Tabs.module.css';
 
 export interface TabItem<T extends string> {
   id: T;
-  label: string;
+  /** 可能是 i18n 文案，也可能是被切换的模块标题。 */
+  label: ReactNode;
   count?: number;
 }
 
