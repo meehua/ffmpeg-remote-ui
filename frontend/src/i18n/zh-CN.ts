@@ -207,6 +207,10 @@ export const zhCN = {
     '没有在服务器上发现任何显示设备。需要专用硬件的类型（qsv、nvenc、amf 之类）可能无法使用；服务器上确实有显卡的话，多半是驱动或设备权限没通。',
   'builder.hwDevice.typeMatch':
     '类型要对得上硬件：FFmpeg 报的是它支持哪些类型，不代表本机就能用。',
+  // 同类型时 ffmpeg 只认一块卡：`-hwaccel_device` 决定整条硬件管线（实测：它指哪块，
+  // 编解码就都在哪块）。界面不把这件事说清楚的话，「填了输入侧却没生效」看起来像 bug。
+  'builder.hwDevice.sharedPipeline':
+    '同一个类型只会用一块卡：`-hwaccel <类型> -hwaccel_device <那块>` 决定整条硬件管线，所以两侧选同一个类型时以输出侧为准（那块才是你要用来编码的），输入侧那一格只在两侧类型不同时才起作用。',
   'builder.hwNode': '设备节点',
   'builder.hwNode.hint': '值的含义随类型而定（cuda 是设备号、vaapi 是渲染节点、vulkan 是索引或名字；QSV 的节点会写进 child_device）；不指定＝让 FFmpeg 自己挑，实测结论会写在值旁边。',
   'builder.hwNode.placeholder': '例如 0、1 或 /dev/dri/renderD128',

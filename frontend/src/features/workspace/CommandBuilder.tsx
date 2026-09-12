@@ -260,6 +260,10 @@ export function CommandBuilder({
         <p className={styles.sectionMeta}>{t('builder.hwDevice.typeMatch')}</p>
       )}
 
+      {/* 两侧之间的关系，同样只说一遍：同一个类型时 ffmpeg 只认一块卡（`-hwaccel_device`
+          决定整条硬件管线），不写清楚的话「填了输入侧却没生效」看起来像 bug。 */}
+      <p className={styles.sectionMeta}>{t('builder.hwDevice.sharedPipeline')}</p>
+
       {/* 公共上下文层取不到时会少掉一整层参数，那是「FFmpeg 说得出、界面看不到」
           的老毛病又回来了，所以这里必须显式报出来，而不是让它静默地少一块。 */}
       {codecGroups.error ? <ErrorNote>{codecGroups.error.message}</ErrorNote> : null}

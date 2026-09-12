@@ -202,6 +202,8 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
     'No display device was found on the server. Types that need dedicated hardware (qsv, nvenc, amf and the like) may not work; if the server does have a GPU, the driver or the device permissions are the likely cause.',
   'builder.hwDevice.typeMatch':
     'The type has to match the hardware: what FFmpeg reports is which types it supports, not which of them this machine can use.',
+  'builder.hwDevice.sharedPipeline':
+    'One card per type: `-hwaccel <type> -hwaccel_device <that card>` decides the whole hardware pipeline, so with the same type on both sides the output side wins - that is the card you want encoding on. The input side only matters when the two sides use different types.',
   'builder.hwNode': 'Device node',
   'builder.hwNode.hint': 'What this value means depends on the type (cuda takes a device number, vaapi a render node, vulkan an index or a name; for QSV the node goes into child_device). "Choose automatically" leaves it to FFmpeg, and a tested value carries FFmpeg\'s own answer.',
   'builder.hwNode.placeholder': 'e.g. 0, 1 or /dev/dri/renderD128',
