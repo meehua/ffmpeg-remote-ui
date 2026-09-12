@@ -137,14 +137,18 @@ export interface StreamSetting {
 }
 
 /**
- * 一次硬件设备初始化，对应 `-init_hw_device <type>=hw[:<device>]`。
+ * 一次硬件设备初始化，对应 `-init_hw_device <type>=<name>[:<device>]`。
  *
  * 选项名来自 ffmpeg 的 Global options（`-h full` 原文：`-init_hw_device
  * <args>  initialise hardware device`）。类型与节点都是服务器报告的事实，
  * 这里不做任何型号推断，因此它保留结构化的两个字段，而不是一个自由文本框。
+ *
+ * 输入侧与输出侧各有一份：两侧可以要不同的类型（输入用 cuda 解码、输出用 qsv
+ * 编码是常见组合），也都可以留空。ffmpeg 允许 `-init_hw_device` 出现多次，但
+ * 设备名必须唯一，所以名字怎么取见 buildArgs 里的 appendHardware。
  */
 export interface HwDeviceSetting {
-  /** 设备类型，例如 qsv、vaapi、cuda。 */
+  /** 设备类型，例如 qsv、vaapi、cuda；空串表示这一侧不初始化。 */
   type: string;
   /** 设备节点，例如 /dev/dri/renderD129；留空表示交给 FFmpeg 自己挑。 */
   device: string;
@@ -161,7 +165,10 @@ export interface EncodeSettings {
   cli: CliEntry[];
   /** 每类流的设置；没配置过的类别就是缺席，界面按空处理。 */
   streams: Record<string, StreamSetting>;
-  hwDevice: HwDeviceSetting;
+  /** 输入侧要初始化的硬件设备；留空表示这一侧不初始化。 */
+  inputHardware: HwDeviceSetting;
+  /** 输出侧要初始化的硬件设备；留空表示这一侧不初始化。 */
+  outputHardware: HwDeviceSetting;
   /** 输入侧：`-f` 指定的 demuxer（设备也在这一列）及其实例参数。 */
   inputFormat: FormatSetting;
   /** 输出侧：`-f` 指定的 muxer 及其实例参数。 */
@@ -189,7 +196,8 @@ export const emptyStream: StreamSetting = {
 export const emptySettings: EncodeSettings = {
   cli: [],
   streams: {},
-  hwDevice: { type: '', device: '' },
+  inputHardware: { type: '', device: '' },
+  outputHardware: { type: '', device: '' },
   inputFormat: { name: '', options: {} },
   outputFormat: { name: '', options: {} },
   inputProtocol: { name: '', options: {} },
@@ -343,6 +351,22 @@ function normalizeFilterComplex(raw: unknown): FilterComplexSetting {
 }
 
 /**
+ * 收拢一处硬件设备设置。
+ *
+ * 按顺序取第一个是对象的来源：新结构有 `inputHardware` / `outputHardware` 两份，
+ * 旧结构只有一份 `hwDevice`。旧的那份迁到**输入侧**——`-init_hw_device` 是全局
+ * 选项，放哪一侧生成的命令都一样，所以这份老预设的行为一字不变。
+ */
+function normalizeHardware(...sources: unknown[]): HwDeviceSetting {
+  for (const source of sources) {
+    if (isRecord(source)) {
+      return { type: stringOr(source.type), device: stringOr(source.device) };
+    }
+  }
+  return { type: '', device: '' };
+}
+
+/**
  * 把外部来的数据收拢成 EncodeSettings。
  *
  * 数据来源有三个：浏览器本地存档、服务器上的预设文件，以及更早版本的界面。
@@ -351,19 +375,22 @@ function normalizeFilterComplex(raw: unknown): FilterComplexSetting {
  */
 export function normalizeSettings(raw: unknown): EncodeSettings {
   const record = isRecord(raw) ? raw : {};
-  const hw = isRecord(record.hwDevice) ? record.hwDevice : {};
-  const hwDevice = { type: stringOr(hw.type), device: stringOr(hw.device) };
 
   // 旧结构（编码器直接放在顶层，只有视频与音频两类）迁移过来。
   const hasCli = isRecord(record.cli) || Array.isArray(record.cli);
   if (!hasCli && !isRecord(record.streams)) {
-    return { ...fromLegacy(record), hwDevice };
+    return {
+      ...fromLegacy(record),
+      inputHardware: normalizeHardware(record.inputHardware, record.hwDevice),
+      outputHardware: normalizeHardware(record.outputHardware),
+    };
   }
 
   return {
     cli: normalizeEntries(record.cli),
     streams: normalizeStreams(record.streams),
-    hwDevice,
+    inputHardware: normalizeHardware(record.inputHardware, record.hwDevice),
+    outputHardware: normalizeHardware(record.outputHardware),
     inputFormat: normalizeFormat(record.inputFormat),
     outputFormat: normalizeFormat(record.outputFormat),
     inputProtocol: normalizeProtocol(record.inputProtocol),
@@ -479,11 +506,31 @@ function appendStreamOutput(args: string[], spec: string, stream: StreamSetting)
 }
 
 /**
+ * 追加一次 `-init_hw_device`，同一个类型只生成一条。
+ *
+ * 设备名取类型名（`qsv=qsv`）而不是文档里常见的 `hw`：输入侧与输出侧可以各选
+ * 一个类型，而 ffmpeg 要求设备名唯一，两条都叫 `hw` 就会撞名。名字不参与设备
+ * 的选择——`-c:v h264_qsv` 这类按类型找设备，所以叫什么名字都对得上。
+ *
+ * `done` 让同一个类型在两侧同时选中时只生成一条：重复初始化同一种设备没有意义，
+ * 而且同样会撞名。
+ */
+function appendHardware(args: string[], hw: HwDeviceSetting, done: Set<string>): void {
+  const type = hw.type.trim();
+  if (type === '' || done.has(type)) {
+    return;
+  }
+  done.add(type);
+  const device = hw.device.trim();
+  args.push('-init_hw_device', device === '' ? `${type}=${type}` : `${type}=${type}:${device}`);
+}
+
+/**
  * 按 ffmpeg 的参数分层拼装：
  *
- *   全局选项 → 硬件设备 → 输入协议参数 → 输入侧选项 → -f 输入格式 →
- *   每类流的解码器 → -i 输入 → filter_complex 与 -map → 每类流的编码设置
- *   （编码器 → bsf → 简单滤镜链）→ 输出侧选项 → -f 输出格式 →
+ *   全局选项 → 硬件设备（输入侧、输出侧各一次）→ 输入协议参数 → 输入侧选项 →
+ *   -f 输入格式 → 每类流的解码器 → -i 输入 → filter_complex 与 -map →
+ *   每类流的编码设置（编码器 → bsf → 简单滤镜链）→ 输出侧选项 → -f 输出格式 →
  *   输出协议参数 → 手写补充参数 → 输出文件
  *
  * 这个层次不是一份手写的顺序表，而是「选项属于 ffmpeg 的哪一段」的直接结果：
@@ -504,13 +551,11 @@ export function buildArgs({
 
   appendCli(args, settings.cli, 'global');
 
-  // 硬件设备是全局选项（-h full: "-init_hw_device <args> initialise hardware
-  // device"）。它的值由类型与节点拼成，两者都取自服务器报告的事实。
-  const hw = settings.hwDevice;
-  if (hw.type !== '') {
-    const device = hw.device.trim();
-    args.push('-init_hw_device', device === '' ? `${hw.type}=hw` : `${hw.type}=hw:${device}`);
-  }
+  // 硬件设备的初始化是全局选项（-h full: "-init_hw_device <args> initialise
+  // hardware device"），输入侧与输出侧各一份，两侧都留空就都不生成。
+  const hardwareDone = new Set<string>();
+  appendHardware(args, settings.inputHardware, hardwareDone);
+  appendHardware(args, settings.outputHardware, hardwareDone);
 
   // 协议参数是注册在 URLContext 上的普通选项（-http_proxy、-timeout…），
   // 按它作用的方向摆在对应文件之前。

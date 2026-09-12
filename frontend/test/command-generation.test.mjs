@@ -448,3 +448,47 @@ test('filter_complex 与 -map 生成的命令真的能被 FFmpeg 接受', () => 
 
   execFileSync('ffmpeg', real, { stdio: 'inherit' });
 });
+
+test('Case 10：输入侧与输出侧各可初始化一个硬件设备，同一类型只生成一条', () => {
+  // 两侧各一个类型：`-init_hw_device` 本来就可以出现多次，这是它正当的用法
+  // （输入用 cuda 解码、输出用 qsv 编码）。
+  const both = {
+    ...args.emptySettings,
+    inputHardware: { type: 'cuda', device: '' },
+    outputHardware: { type: 'qsv', device: '0' },
+  };
+  assert.deepEqual(build(both).slice(0, 4), [
+    '-init_hw_device',
+    'cuda=cuda',
+    '-init_hw_device',
+    'qsv=qsv:0',
+  ]);
+
+  // 两侧选了同一个类型：只生成一条——重复初始化同一种设备没有意义，而且
+  // ffmpeg 要求设备名唯一，两条都会叫 qsv。
+  const same = {
+    ...args.emptySettings,
+    inputHardware: { type: 'qsv', device: '' },
+    outputHardware: { type: 'qsv', device: '/dev/dri/renderD128' },
+  };
+  assert.deepEqual(build(same).slice(0, 2), ['-init_hw_device', 'qsv=qsv']);
+
+  // 两侧都留空：一条也不生成，其余照旧。
+  assert.deepEqual(build(args.emptySettings), ['-i', 'in.mp4', 'out.mp4']);
+});
+
+test('旧预设里那一个 hwDevice 迁到输入侧，生成的命令一字不差', () => {
+  const loaded = recipe.decodeRecipe({
+    version: 2,
+    settings: {
+      cli: [],
+      streams: {},
+      hwDevice: { type: 'qsv', device: '0' },
+    },
+    extraArgs: '',
+  });
+  assert.ok(loaded, '旧配方应当能读回来');
+  assert.equal(loaded.settings.inputHardware.type, 'qsv');
+  assert.equal(loaded.settings.outputHardware.type, '');
+  assert.deepEqual(build(loaded.settings).slice(0, 2), ['-init_hw_device', 'qsv=qsv:0']);
+});

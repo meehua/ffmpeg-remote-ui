@@ -197,9 +197,11 @@ export const zhCN = {
   'option.useDefault': '（使用默认）',
 
   /* ------------------------------------------------------------ 参数构建 */
-  'builder.hwDevice': '硬件设备',
-  'builder.hwDevice.hint': '设备类型取自服务器；节点那一格留空就先让 FFmpeg 挑，拿不准就点下面的实测。',
-  'builder.hwDevice.none': '不初始化（交给 FFmpeg 默认）',
+  'builder.hwDevice': '硬件类型',
+  'builder.hwDevice.input': '输入硬件类型',
+  'builder.hwDevice.output': '输出硬件类型',
+  'builder.hwDevice.hint': '类型取自服务器；节点那一格留空就先让 FFmpeg 挑，拿不准就点下面的实测。两侧都可以留空。',
+  'builder.hwDevice.none': '不使用（不初始化设备）',
   'builder.hwDevice.empty': '这套 FFmpeg 没有报告任何硬件设备类型（`-init_hw_device list` 为空）。',
   'builder.hwDevice.noDevices':
     '没有在服务器上发现任何显示设备。需要专用硬件的类型（qsv、nvenc、amf 之类）可能无法使用；服务器上确实有显卡的话，多半是驱动或设备权限没通。',

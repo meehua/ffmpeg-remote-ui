@@ -192,9 +192,11 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'option.useDefault': '(use default)',
 
   /* ------------------------------------------------------ Command builder */
-  'builder.hwDevice': 'Hardware device',
-  'builder.hwDevice.hint': 'The device type comes from the server; leave the node empty to let FFmpeg choose, or test below when unsure.',
-  'builder.hwDevice.none': 'Do not initialise (leave it to FFmpeg)',
+  'builder.hwDevice': 'Hardware type',
+  'builder.hwDevice.input': 'Input hardware type',
+  'builder.hwDevice.output': 'Output hardware type',
+  'builder.hwDevice.hint': 'The type comes from the server; leave the node empty to let FFmpeg choose, or test below when unsure. Either side may be left empty.',
+  'builder.hwDevice.none': 'Do not use hardware (no device initialised)',
   'builder.hwDevice.empty': 'This FFmpeg reports no hardware device types (`-init_hw_device list` is empty).',
   'builder.hwDevice.noDevices':
     'No display device was found on the server. Types that need dedicated hardware (qsv, nvenc, amf and the like) may not work; if the server does have a GPU, the driver or the device permissions are the likely cause.',

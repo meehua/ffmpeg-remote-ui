@@ -33,6 +33,7 @@ import {
   type EncodeSettings,
   type FilterComplexSetting,
   type FormatSetting,
+  type HwDeviceSetting,
   type ProtocolSetting,
   type StreamSetting,
 } from './args';
@@ -217,126 +218,35 @@ export function CommandBuilder({
   // `-c:v hevc_qsv -global_quality 21` 里的 global_quality 根本进不来。
   const codecGroups = useAsync(() => api.optionGroups(), []);
 
-  const setHwDevice = (patch: Partial<EncodeSettings['hwDevice']>) =>
-    onChange({ ...settings, hwDevice: { ...settings.hwDevice, ...patch } });
-
-  // 实测结果连着它测的是哪个类型一起存：同一个 `1` 在 cuda 眼里是第 1 块 NVIDIA 卡、
-  // 在 qsv 眼里是软件实现，换了类型旧结论就不作数，所以只在类型对得上时才采用。
-  const [probes, setProbes] = useState<{ type: string; results: HWProbe[] } | null>(null);
-  const probe = useAction();
-  const results = probes && probes.type === settings.hwDevice.type ? probes.results : null;
-
-  // 下拉停在「手动填写」那一项时才出文本框。它与设备值是两回事：值仍然存在
-  // settings.hwDevice.device 里，这个标记只表示「不从上面的候选里挑」。
-  const [manual, setManual] = useState(false);
-
-  // 设备节点的全部候选：不指定、实测过的值、清单里系统给了名字的值、手填过的值，
-  // 最后是手填这一项。每一条的结论都是 FFmpeg 说的，界面不替它下判断。
-  const nodes = useMemo(
-    () => hwNodeChoices(devices, results, settings.hwDevice.device),
-    [devices, results, settings.hwDevice.device],
-  );
-  // 手填过的值也留着文本框：否则重开一次界面，下拉停在那条「未实测」上，想改都没处改。
-  const editing = manual || nodes.some((node) => node.kind === 'untested');
-
-  /**
-   * 让服务器把当前类型配每个候选都试一遍。
-   *
-   * 候选里既有「不指定」（第一个该试的组合），也有几个小序数与设备清单里的名字；
-   * 哪些是序数、哪些能用，都不是这里判断的——界面只是把一串值报上去，让 FFmpeg
-   * 每个都回答一次，再把它的原话摆回来。
-   */
-  const runProbe = () => {
-    const type = settings.hwDevice.type;
-    const candidates = probeCandidates(devices, settings.hwDevice.device);
-    void probe.run(async () => {
-      const result = await api.hardwareProbe(type, candidates);
-      setProbes({ type, results: result.results });
-    });
-  };
-
   return (
     <div className={styles.builder}>
-      <Field label={t('builder.hwDevice')} hint={t('builder.hwDevice.hint')}>
-        <Select
-          value={settings.hwDevice.type}
-          onChange={(event) => setHwDevice({ type: event.target.value })}
-        >
-          <option value="">{t('builder.hwDevice.none')}</option>
-          {snapshot.hwDeviceTypes.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </Select>
-      </Field>
+      {/* 输入侧与输出侧各一个硬件设备。两侧可以要不同的类型（输入用 cuda 解码、
+          输出用 qsv 编码是常见组合），也都可以留空。 */}
+      <HardwareSection
+        label={t('builder.hwDevice.input')}
+        setting={settings.inputHardware}
+        types={snapshot.hwDeviceTypes}
+        devices={devices}
+        onChange={(inputHardware) => onChange({ ...settings, inputHardware })}
+      />
 
+      <HardwareSection
+        label={t('builder.hwDevice.output')}
+        setting={settings.outputHardware}
+        types={snapshot.hwDeviceTypes}
+        devices={devices}
+        onChange={(outputHardware) => onChange({ ...settings, outputHardware })}
+      />
+
+      {/* 下面这条说的是两侧共同的前提，所以只写一遍：FFmpeg 报的是它支持哪些类型，
+          与这台机器上究竟有什么卡是两回事。 */}
       {snapshot.hwDeviceTypes.length === 0 ? (
         <p className={styles.sectionMeta}>{t('builder.hwDevice.empty')}</p>
-      ) : null}
-
-      {/* 两条互斥的提醒，说的是同一件事的两面：ffmpeg 报的是「这套 FFmpeg 支持
-          哪些类型」，与机器上究竟有哪块卡是两回事。一台设备都没发现时要先讲清
-          「可能用不了」，发现了设备也要讲清「类型对不上照样用不了」。 */}
-      {devices.length === 0 ? (
+      ) : devices.length === 0 ? (
         <p className={styles.sectionMeta}>{t('builder.hwDevice.noDevices')}</p>
       ) : (
         <p className={styles.sectionMeta}>{t('builder.hwDevice.typeMatch')}</p>
       )}
-
-      {settings.hwDevice.type !== '' ? (
-        <>
-          {/* 设备值不预填、也不从设备清单里推：候选里既有清单给出的名字，也有实测过的
-              值，还有「不指定」——那一条就是让 FFmpeg 自己挑，实测会把它排在最前面。
-              每条候选写着的结论都来自 FFmpeg，完整原文挂在该选项的 title 上。 */}
-          <Field label={t('builder.hwNode')} hint={t('builder.hwNode.hint')}>
-            <Select
-              value={manual ? hwNodeManual : settings.hwDevice.device}
-              aria-label={t('builder.hwNode')}
-              onChange={(event) => {
-                const next = event.target.value;
-                setManual(next === hwNodeManual);
-                // 选了「手动填写」不动设备值：上一个值还留着，用户接着改它的文本。
-                if (next !== hwNodeManual) {
-                  setHwDevice({ device: next });
-                }
-              }}
-            >
-              {nodes.map((node) => (
-                <option
-                  key={node.value === '' ? 'auto' : node.value}
-                  value={node.value}
-                  title={node.detail || undefined}
-                >
-                  {hwNodeLabel(node, t)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          {editing ? (
-            <Field label={t('builder.hwNode.manual')}>
-              <TextInput
-                value={settings.hwDevice.device}
-                placeholder={t('builder.hwNode.placeholder')}
-                aria-label={t('builder.hwNode')}
-                onChange={(event) => setHwDevice({ device: event.target.value })}
-              />
-            </Field>
-          ) : null}
-
-          {/* 「哪个设备值能用」不靠猜：让服务器真的初始化一次，由 FFmpeg 回答；回答
-              随后出现在上面的下拉里，每个值那一行写的就是它给的结论。 */}
-          <div className={styles.probe}>
-            <Button compact onClick={runProbe} disabled={probe.pending}>
-              {probe.pending ? t('builder.hwProbe.running') : t('builder.hwProbe.run')}
-            </Button>
-            <span className={styles.sectionMeta}>{t('builder.hwProbe.hint')}</span>
-          </div>
-
-          {probe.error ? <ErrorNote>{probe.error.message}</ErrorNote> : null}
-        </>
-      ) : null}
 
       {/* 公共上下文层取不到时会少掉一整层参数，那是「FFmpeg 说得出、界面看不到」
           的老毛病又回来了，所以这里必须显式报出来，而不是让它静默地少一块。 */}
@@ -405,6 +315,135 @@ export function CommandBuilder({
         onChange={(cli) => onChange({ ...settings, cli })}
       />
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- 硬件设备 */
+
+interface HardwareSectionProps {
+  /** 这一侧的名字：「输入硬件类型」/「输出硬件类型」。 */
+  label: string;
+  /** 这一侧的设备：类型 + 节点，都可以留空。 */
+  setting: HwDeviceSetting;
+  /** 这套 FFmpeg 报告的设备类型（`-init_hw_device list`）。 */
+  types: string[];
+  /** 服务器上真实存在的显示设备，用作设备节点候选。 */
+  devices: GpuDevice[];
+  onChange: (next: HwDeviceSetting) => void;
+}
+
+/**
+ * 一侧的硬件设备：类型 + 设备节点 + 实测。
+ *
+ * 输入侧与输出侧各渲染一次。两份各自记着自己的实测结果——同一个 `1` 在 cuda 眼里
+ * 是第 1 块 NVIDIA 卡、在 qsv 眼里是软件实现，换了类型旧结论就不作数，所以只在
+ * 类型对得上时才采用。
+ *
+ * 设备节点那一格不预填、也不从设备清单里推：候选里既有清单系统给出的名字，也有
+ * 实测过的值，还有「不指定」——那一条就是让 FFmpeg 自己挑。每一行的结论都来自
+ * FFmpeg 的原话。
+ */
+function HardwareSection({ label, setting, types, devices, onChange }: HardwareSectionProps) {
+  const { t } = useI18n();
+  const [probes, setProbes] = useState<{ type: string; results: HWProbe[] } | null>(null);
+  const probe = useAction();
+  const results = probes && probes.type === setting.type ? probes.results : null;
+
+  // 下拉停在「手动填写」那一项时才出文本框。它与设备值是两回事：值仍然存在
+  // setting.device 里，这个标记只表示「不从上面的候选里挑」。
+  const [manual, setManual] = useState(false);
+
+  const nodes = useMemo(
+    () => hwNodeChoices(devices, results, setting.device),
+    [devices, results, setting.device],
+  );
+  // 手填过的值也留着文本框：否则重开一次界面，下拉停在那条「未实测」上，想改都没处改。
+  const editing = manual || nodes.some((node) => node.kind === 'untested');
+
+  /**
+   * 让服务器把当前类型配每个候选都试一遍。
+   *
+   * 候选里既有「不指定」（第一个该试的组合），也有几个小序数与设备清单里的名字；
+   * 哪些是序数、哪些能用，都不是这里判断的——界面只是把一串值报上去，让 FFmpeg
+   * 每个都回答一次，再把它的原话摆回来。
+   */
+  const runProbe = () => {
+    const type = setting.type;
+    const candidates = probeCandidates(devices, setting.device);
+    void probe.run(async () => {
+      const result = await api.hardwareProbe(type, candidates);
+      setProbes({ type, results: result.results });
+    });
+  };
+
+  return (
+    <>
+      <Field label={label} hint={t('builder.hwDevice.hint')}>
+        <Select
+          value={setting.type}
+          aria-label={label}
+          onChange={(event) => onChange({ ...setting, type: event.target.value })}
+        >
+          <option value="">{t('builder.hwDevice.none')}</option>
+          {types.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {setting.type === '' ? null : (
+        <>
+          <Field label={t('builder.hwNode')} hint={t('builder.hwNode.hint')}>
+            <Select
+              value={manual ? hwNodeManual : setting.device}
+              aria-label={t('builder.hwNode')}
+              onChange={(event) => {
+                const next = event.target.value;
+                setManual(next === hwNodeManual);
+                // 选了「手动填写」不动设备值：上一个值还留着，用户接着改它的文本。
+                if (next !== hwNodeManual) {
+                  onChange({ ...setting, device: next });
+                }
+              }}
+            >
+              {nodes.map((node) => (
+                <option
+                  key={node.value === '' ? 'auto' : node.value}
+                  value={node.value}
+                  title={node.detail || undefined}
+                >
+                  {hwNodeLabel(node, t)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          {editing ? (
+            <Field label={t('builder.hwNode.manual')}>
+              <TextInput
+                value={setting.device}
+                placeholder={t('builder.hwNode.placeholder')}
+                aria-label={t('builder.hwNode')}
+                onChange={(event) => onChange({ ...setting, device: event.target.value })}
+              />
+            </Field>
+          ) : null}
+
+          {/* 「哪个设备值能用」不靠猜：让服务器真的初始化一次，由 FFmpeg 回答；回答
+              随后出现在上面的下拉里，每个值那一行写的就是它给的结论。 */}
+          <div className={styles.probe}>
+            <Button compact onClick={runProbe} disabled={probe.pending}>
+              {probe.pending ? t('builder.hwProbe.running') : t('builder.hwProbe.run')}
+            </Button>
+            <span className={styles.sectionMeta}>{t('builder.hwProbe.hint')}</span>
+          </div>
+
+          {probe.error ? <ErrorNote>{probe.error.message}</ErrorNote> : null}
+        </>
+      )}
+    </>
   );
 }
 
