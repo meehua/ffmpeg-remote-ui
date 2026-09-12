@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A web FFmpeg console for Linux servers and NAS boxes.
+A web FFmpeg console for Linux and Windows servers, and NAS boxes.
 
 "remote" is meant literally: the browser is only the remote control. Media files,
 `ffprobe`, `ffmpeg`, the GPU and the job queue all live on the machine running the
@@ -60,7 +60,7 @@ cmd/ffmpeg-remote-ui  entry point: env vars, graceful shutdown, embedded fronten
 internal/ffmpeg     FFmpeg/FFprobe queries and parsing (capability snapshot, -h, ffprobe)
 internal/queue      concurrency-limited job queue (state machine, progress, logs, events)
 internal/server     HTTP layer (routing, SSE event stream, file browsing, static assets)
-internal/hardware   Linux DRM render node discovery (read-only sysfs, no capability inference)
+internal/hardware   platform-specific device discovery (sysfs on Linux, the registry on Windows; no capability inference)
 frontend            React frontend (no UI component library, no CSS framework)
 ```
 
@@ -103,8 +103,9 @@ frontend            React frontend (no UI component library, no CSS framework)
 - Two modes for building the command line: a form whose structure and options both
   come from ffmpeg's own `-h` output (see "The UI mirrors ffmpeg's own command
   line" above), and hand-written argv. `shellQuote` / `SplitArgs` follow the same
-  rules on both frontend and backend, so the command you preview is the one that
-  runs.
+  rules on both frontend and backend — in two sets, POSIX and cmd, picked by the
+  server's platform — so the command you preview is the one that runs, and it means
+  the same thing when pasted into the server's shell.
 - **The form keeps what you typed.** Every field in the workspace and batch views
   is stored in `localStorage` through one hook, so switching sections or reloading
   the page no longer wipes a half-filled command. Stored data is normalised on
@@ -134,23 +135,34 @@ frontend            React frontend (no UI component library, no CSS framework)
   before the jobs are submitted — FFmpeg itself never creates them. Extensions
   stay the job of the naming settings, not of the structure.
 - **Hardware devices can be chosen explicitly**: the device type comes from
-  `ffmpeg -init_hw_device list` and the device node from `/dev/dri`. On machines
+  `ffmpeg -init_hw_device list` and the device node from the system's own device
+  list (`/dev/dri` on Linux, the display adapters Windows registers). On machines
   with more than one GPU (integrated plus discrete, say) FFmpeg picks one on its
   own, and picking wrong shows up as "failed to open encoder". Selecting one emits
   `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device initialization
-  is a global option and loses its meaning after the input.
+  is a global option and loses its meaning after the input. On Windows you normally
+  don't need a node at all: the device type (`d3d11va`, `qsv`, `cuda`, …) is enough
+  for FFmpeg to pick.
 
 ## Build
 
-Requires Go 1.26.x and Node.js:
+Requires Go 1.26.x and Node.js.
+
+Linux and macOS (and Windows under Git Bash):
 
 ```bash
 ./build.sh
 ```
 
-The script builds the frontend, copies `frontend/dist` into
-`cmd/ffmpeg-remote-ui/web`, runs `go vet` and `go test`, and finally produces
-`./ffmpeg-remote-ui`.
+Windows PowerShell:
+
+```powershell
+.\build.ps1
+```
+
+Both scripts do the same thing: build the frontend, copy `frontend/dist` into
+`cmd/ffmpeg-remote-ui/web`, run `go vet` and `go test`, and finally produce the
+executable (`ffmpeg-remote-ui.exe` on Windows).
 
 Frontend dependencies (all current stable):
 
@@ -180,11 +192,11 @@ colliding with other services on the same host (especially generic names such as
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FFMPEG_REMOTE_UI_HTTP_ADDR` | `127.0.0.1:0` | Listen address; `:0` lets the system pick a port |
-| `FFMPEG_REMOTE_UI_MEDIA_ROOTS` | empty | Directories that may be accessed, `:`-separated; empty means unrestricted |
+| `FFMPEG_REMOTE_UI_MEDIA_ROOTS` | empty | Directories that may be accessed, separated by the system's path list separator (`:` on Linux, `;` on Windows); empty means unrestricted |
 | `FFMPEG_REMOTE_UI_FFMPEG_PATH` | `ffmpeg` | Resolved from `PATH` |
 | `FFMPEG_REMOTE_UI_FFPROBE_PATH` | `ffprobe` | Resolved from `PATH` |
 | `FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS` | `1` | Number of concurrent ffmpeg processes |
-| `FFMPEG_REMOTE_UI_CONFIG_DIR` | `$XDG_CONFIG_HOME/ffmpeg-remote-ui` | Where `config.json` and `presets/` live |
+| `FFMPEG_REMOTE_UI_CONFIG_DIR` | Linux: `$XDG_CONFIG_HOME/ffmpeg-remote-ui`; Windows: `%AppData%\ffmpeg-remote-ui` | Where `config.json` and `presets/` live |
 
 ### The config file
 
@@ -216,7 +228,7 @@ Presets are plain JSON files next to `config.json`, written atomically and
 editable by hand:
 
 ```
-~/.config/ffmpeg-remote-ui/
+~/.config/ffmpeg-remote-ui/          # %AppData%\ffmpeg-remote-ui\ on Windows
 ├── config.json
 └── presets/
     └── x265 slow.json
@@ -236,7 +248,21 @@ FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
   ./ffmpeg-remote-ui
 ```
 
+On Windows the same override looks like this (note the semicolon between roots —
+that is the separator the system actually uses there):
+
+```powershell
+$env:FFMPEG_REMOTE_UI_HTTP_ADDR = ':8090'
+$env:FFMPEG_REMOTE_UI_MEDIA_ROOTS = 'D:\media;E:\media'
+$env:FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS = '2'
+.\ffmpeg-remote-ui.exe
+```
+
 ## Hardware acceleration
+
+This section is about Linux. On Windows FFmpeg goes through D3D11 / QSV / NVENC and
+none of the `/dev/dri` permission dance below applies (a working graphics driver is
+enough), so that part can be skipped entirely.
 
 Hardware encoding **starts with device permissions**, and this is where people get
 stuck most often: `/dev/dri/renderD*` is owned by `root:render` with mode
@@ -325,10 +351,10 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # start the backend separately on
 | GET | `/api/ffmpeg/cli?level=` | ffmpeg's own command-line topology: sections → options, with the scope and media type read out of each section title |
 | GET | `/api/ffmpeg/extensions?target=` | File extensions ffmpeg declares for `demuxer` (input side) or `muxer` (output side) |
 | GET | `/api/probe?path=` | Server-side ffprobe |
-| GET | `/api/files?path=` | Directory listing (size, mtime, extension) |
+| GET | `/api/files?path=` | Directory listing (size, mtime, extension); without `path` it returns the entry points (the media roots, or the filesystem roots when none are configured) |
 | GET | `/api/files/scan?path=&ext=&limit=` | Recursive scan; `ext` is an optional comma-separated allow-list |
 | POST | `/api/dirs` | Create output directories, parents included |
-| GET | `/api/hardware` | DRM devices |
+| GET | `/api/hardware` | Display devices |
 | POST | `/api/command` | argv or free-form text → final command preview |
 | GET | `/api/config` | Effective runtime settings and the origin of each value |
 | GET | `/api/presets` | Preset directory and the list of presets |

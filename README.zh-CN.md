@@ -2,7 +2,7 @@
 
 **简体中文** | [English](README.md)
 
-一个面向 Linux 服务器 / NAS 的 Web FFmpeg 控制台。
+一个面向 Linux / Windows 服务器与 NAS 的 Web FFmpeg 控制台。
 
 名字里的 remote 是字面意思：浏览器只是一块远程界面，媒体文件、`ffprobe`、`ffmpeg`、
 GPU 与任务队列全部位于运行程序的服务器上；浏览器既不转码，也不要求上传服务器
@@ -48,7 +48,7 @@ cmd/ffmpeg-remote-ui  入口：运行时设置、优雅关闭、嵌入式前端
 internal/ffmpeg     FFmpeg/FFprobe 查询与解析（能力快照、-h 结构、ffprobe）
 internal/queue      并发受限的任务队列（状态机、进度、日志、事件广播）
 internal/server     HTTP 层（路由、SSE 事件流、文件浏览、目录扫描、静态资源）
-internal/hardware   Linux DRM render node 发现（只读 sysfs，不推断能力）
+internal/hardware   平台相关的设备发现（Linux 读 sysfs，Windows 读注册表；不推断能力）
 internal/config     运行时设置：环境变量 + config.json + 默认值三级合并
 internal/preset     预设存储：用户配置目录下的 JSON 文件
 frontend            React 前端（无 UI 组件库、无 CSS 框架）
@@ -85,8 +85,9 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   变成并列分栏、标题吸顶。两种形态是同一份 DOM，只由方向媒体查询切换。
 - 参数构建器与手写 argv 双模式：参数构建器的结构与选项全部来自 ffmpeg 自己的
   `-h` 输出（见设计要点里的「界面就是 ffmpeg 的命令行本身」），手写模式则直接写
-  命令行；`shellQuote` 与 `SplitArgs` 在前端和后端是同一套规则，因此预览到的
-  命令与实际执行的一致。
+  命令行；`shellQuote` 与 `SplitArgs` 在前端和后端是同一套规则，而且两边都按服务器
+  平台分 POSIX 与 cmd 两份实现，因此预览到的命令与实际执行的一致，粘到服务器的
+  终端里也是同一个意思。
 - **表单填过的东西不会白填**：工作区与批处理的每个字段都经同一个 hook 存进
   浏览器本地存档，切换功能域或刷新页面都不再清空；读回时会先归一化，旧存档或
   坏存档退回默认值，而不是把界面弄崩。
@@ -108,20 +109,30 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   输出目录会在提交前建好——FFmpeg 自己不会创建目录。扩展名始终归命名设置管，
   与结构还原无关。
 - **硬件设备可显式指定**：设备类型取自 `ffmpeg -init_hw_device list`，设备节点取自
-  `/dev/dri`；机器上有多块 GPU（例如核显 + 独显）时 FFmpeg 会自己挑一个，
-  挑错就表现为「打开编码器失败」。选中后生成 `-init_hw_device <type>=hw:<node>`，
-  并放在 `-i` 之前——设备初始化是全局选项，放在输入之后就失去语义了。
+  系统自己的设备清单（Linux 上是 `/dev/dri`，Windows 上是注册表里登记的显示适配器）；
+  机器上有多块 GPU（例如核显 + 独显）时 FFmpeg 会自己挑一个，挑错就表现为
+  「打开编码器失败」。选中后生成 `-init_hw_device <type>=hw:<node>`，并放在 `-i`
+  之前——设备初始化是全局选项，放在输入之后就失去语义了。Windows 上通常不必指定
+  节点，光设备类型（`d3d11va`、`qsv`、`cuda`…）就够 FFmpeg 挑。
 
 ## 构建
 
-需要 Go 1.26.x 与 Node.js：
+需要 Go 1.26.x 与 Node.js。
+
+Linux / macOS（Windows 上的 Git Bash 同样可以）：
 
 ```bash
 ./build.sh
 ```
 
-脚本会构建前端、把 `frontend/dist` 复制到 `cmd/ffmpeg-remote-ui/web`、跑 `go vet`
-与 `go test`，最后产出 `./ffmpeg-remote-ui`。
+Windows PowerShell：
+
+```powershell
+.\build.ps1
+```
+
+两份脚本流程一致：构建前端、把 `frontend/dist` 复制到 `cmd/ffmpeg-remote-ui/web`、
+跑 `go vet` 与 `go test`，最后产出可执行文件（Windows 上是 `ffmpeg-remote-ui.exe`）。
 
 前端依赖（均为当前稳定版）：
 
@@ -135,8 +146,16 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
 
 ## 运行
 
+Linux / macOS：
+
 ```bash
 ./ffmpeg-remote-ui
+```
+
+Windows：
+
+```powershell
+.\ffmpeg-remote-ui.exe
 ```
 
 终端会打印实际监听地址、生效的媒体目录，以及每个设置来自哪一层。
@@ -148,11 +167,11 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `FFMPEG_REMOTE_UI_HTTP_ADDR` | `127.0.0.1:0` | 监听地址；`:0` 表示由系统分配端口 |
-| `FFMPEG_REMOTE_UI_MEDIA_ROOTS` | 空 | 允许访问的媒体根目录，用 `:` 分隔；留空表示不限制 |
+| `FFMPEG_REMOTE_UI_MEDIA_ROOTS` | 空 | 允许访问的媒体根目录，按系统的路径列表分隔符分隔（Linux 上 `:`，Windows 上 `;`）；留空表示不限制 |
 | `FFMPEG_REMOTE_UI_FFMPEG_PATH` | `ffmpeg` | 从 `PATH` 查找 |
 | `FFMPEG_REMOTE_UI_FFPROBE_PATH` | `ffprobe` | 从 `PATH` 查找 |
 | `FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS` | `1` | 同时运行的 ffmpeg 进程数 |
-| `FFMPEG_REMOTE_UI_CONFIG_DIR` | `$XDG_CONFIG_HOME/ffmpeg-remote-ui` | `config.json` 与 `presets/` 所在目录 |
+| `FFMPEG_REMOTE_UI_CONFIG_DIR` | Linux：`$XDG_CONFIG_HOME/ffmpeg-remote-ui`；Windows：`%AppData%\ffmpeg-remote-ui` | `config.json` 与 `presets/` 所在目录 |
 
 例如，用环境变量临时覆盖这一次运行：
 
@@ -161,6 +180,15 @@ FFMPEG_REMOTE_UI_HTTP_ADDR=:8090 \
 FFMPEG_REMOTE_UI_MEDIA_ROOTS=/data/media:/mnt/media \
 FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
   ./ffmpeg-remote-ui
+```
+
+Windows 上同一件事（注意路径之间用分号分隔，因为 `;` 才是系统认的列表分隔符）：
+
+```powershell
+$env:FFMPEG_REMOTE_UI_HTTP_ADDR = ':8090'
+$env:FFMPEG_REMOTE_UI_MEDIA_ROOTS = 'D:\media;E:\media'
+$env:FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS = '2'
+.\ffmpeg-remote-ui.exe
 ```
 
 ### 配置文件
@@ -189,7 +217,7 @@ FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
 也可以手工编辑：
 
 ```
-~/.config/ffmpeg-remote-ui/
+~/.config/ffmpeg-remote-ui/          # Windows 上是 %AppData%\ffmpeg-remote-ui\
 ├── config.json
 └── presets/
     └── x265 慢速.json
@@ -200,6 +228,9 @@ FFMPEG_REMOTE_UI_MAX_CONCURRENT_JOBS=2 \
 不需要动后端。
 
 ## 硬件加速
+
+这一节讲的是 Linux。Windows 上 FFmpeg 走 D3D11 / QSV / NVENC，没有 `/dev/dri`
+那套设备权限问题（显卡驱动装好就行），下面的内容在那边可以整段跳过。
 
 硬件编码**先要解决设备权限**，这是最容易卡住的一步：`/dev/dri/renderD*` 的
 属主是 `root:render`、权限 `rw-rw----`，运行程序的账户不在 `render` 组里时，
@@ -278,10 +309,10 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # 后端另行启动在 8090
 | GET | `/api/ffmpeg/cli?level=` | ffmpeg 自己的命令行拓扑：分节 → 选项，作用范围与媒体类型从分节标题读出 |
 | GET | `/api/ffmpeg/extensions?target=` | ffmpeg 声明的文件扩展名：`demuxer`（输入侧）或 `muxer`（输出侧） |
 | GET | `/api/probe?path=` | 服务器端 ffprobe |
-| GET | `/api/files?path=` | 目录浏览（含大小、修改时间、扩展名） |
+| GET | `/api/files?path=` | 目录浏览（含大小、修改时间、扩展名）；不带 `path` 时给出入口列表（媒体根目录；未配置时是文件系统根） |
 | GET | `/api/files/scan?path=&ext=&limit=` | 递归扫描；`ext` 是可选的逗号分隔扩展名白名单 |
 | POST | `/api/dirs` | 创建输出目录（含父目录） |
-| GET | `/api/hardware` | DRM 设备 |
+| GET | `/api/hardware` | 显示设备 |
 | POST | `/api/command` | argv 或手写文本 → 最终命令预览 |
 | GET | `/api/config` | 生效的运行时设置与每个值的来源 |
 | GET | `/api/presets` | 预设目录与预设列表 |
