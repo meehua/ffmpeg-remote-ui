@@ -19,6 +19,10 @@ import styles from './App.module.css';
 
 type SectionId = 'workspace' | 'batch' | 'catalog' | 'hardware';
 
+/**
+ * 四个功能域。这里切的是「哪一页」；页内各模块之间的切换是另一回事，
+ * 由分栏容器负责，且只在窄屏出现（见 components/Pane.tsx）。
+ */
 const SECTIONS: ReadonlyArray<{ id: SectionId; labelKey: MessageKey; hintKey: MessageKey }> = [
   { id: 'workspace', labelKey: 'app.nav.workspace', hintKey: 'app.nav.workspace.hint' },
   { id: 'batch', labelKey: 'app.nav.batch', hintKey: 'app.nav.batch.hint' },
@@ -62,7 +66,10 @@ export function App() {
           <span className={styles.mark} aria-hidden="true" />
           <span className={styles.brandText}>
             <span className={styles.brandName}>{t('app.brand')}</span>
-            <span className={styles.brandMeta}>{shortVersion ?? t('app.brand.loading')}</span>
+            {/* 版本号长起来会被省略号截断，title 兜住全文。 */}
+            <span className={styles.brandMeta} title={shortVersion ?? undefined}>
+              {shortVersion ?? t('app.brand.loading')}
+            </span>
           </span>
         </div>
 

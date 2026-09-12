@@ -1,7 +1,7 @@
 /*
  * 外壳的两种形态：
- *   竖屏 —— 顶栏在上，内容区（.panes）是唯一的滚动容器；
- *   横屏 —— 顶栏竖过来当左侧栏，内容区横向分栏，每一栏自己滚动。
+ *   窄屏 —— 顶栏在上，内容区（.viewport 里的分栏容器）是唯一的滚动容器；
+ *   宽屏 —— 顶栏竖过来当左侧栏，内容区横向分栏，每一栏自己滚动。
  * 两种形态下外壳都锁在视口高度内：滚动只发生在内容区，页面本身不滚
  * （外壳规则见 styles/base.css）。
  */
@@ -60,11 +60,16 @@
   white-space: nowrap;
 }
 
+/*
+ * 导航是一张等宽的网格，而不是一排按各自文字宽度挤来挤去的按钮：
+ * 每一格的宽度只取决于容器，与标签长短无关，于是窄屏下排出来是整齐的格子，
+ * 侧栏里则是一列对齐的边缘。
+ */
 .nav {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
   gap: var(--gap-2xs);
-  margin-inline-start: auto;
+  inline-size: 100%;
 }
 
 .navItem {
@@ -99,9 +104,11 @@
   font-weight: 500;
 }
 
+/* 说明文字可以换行，但一个长单词（例如 FFmpeg）不该把按钮顶破。 */
 .navHint {
   color: var(--text-faint);
   font-size: var(--text-xs);
+  overflow-wrap: anywhere;
 }
 
 .status {
@@ -111,7 +118,7 @@
   gap: var(--gap-2xs);
 }
 
-/* main 与 viewport 都不滚动，只负责把高度和滚动权传递到 .panes；
+/* main 与 viewport 都不滚动，只负责把高度和滚动权传递到分栏容器；
    overflow: hidden 保证任何意外超高的子项都不会顶破它们。 */
 .main {
   display: flex;
@@ -224,14 +231,9 @@
     border-inline-end: 1px solid var(--line);
   }
 
+  /* 侧栏里就是单列，条目自然铺满整条宽度。 */
   .nav {
-    flex-direction: column;
-    flex-wrap: nowrap;
-    margin-inline-start: 0;
-  }
-
-  .navItem {
-    inline-size: 100%;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .status {

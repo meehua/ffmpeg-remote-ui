@@ -1,16 +1,22 @@
-/* 顶栏里的语言选择器：和 Badge 并排，所以刻意做得同样矮、同样淡。 */
+/*
+ * 顶栏里的语言选择器：它和 Badge 并排，就做成同一族的药丸——一样的高度、一样的
+ * 底色、一样的圆角。它是状态栏里的一件，而不是一个凑在旁边的原生下拉。
+ */
 .switch {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-active);
   color: var(--text-muted);
   font-family: inherit;
   font-size: var(--text-xs);
-  line-height: var(--leading-tight);
-  padding-block: 0.125rem;
-  padding-inline: var(--gap-2xs) var(--gap-xs);
+  /* 行高与内边距对齐 Badge，两者并排时基线才不会错开。 */
+  line-height: 1.7;
+  padding-block: 0.1rem;
+  padding-inline: 0.6rem;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .switch:hover {
