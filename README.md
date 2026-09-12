@@ -21,6 +21,15 @@ comes down to these:
   ranges — all come from runtime queries (`ffmpeg -encoders`,
   `ffmpeg -h encoder=…`, …). There is no built-in capability table anywhere, so
   upgrading FFmpeg on the server automatically changes the UI.
+- **Parameters come in two layers, and so does the UI.** `ffmpeg -h encoder=<name>`
+  only answers "which options does this encoder register itself" (x264's `-crf`,
+  QSV's `-low_power`). Options that libavcodec defines once and **every** encoder
+  shares — `-global_quality`, `-b`, `-maxrate`, `-profile` — live on
+  `AVCodecContext` and appear only in the context sections of `ffmpeg -h full`.
+  The program parses those sections into a separate source, keyed by component
+  layer (codec / format / io / url), and shows them next to the encoder's own
+  options; without that layer a perfectly legal command such as
+  `-c:v hevc_qsv -global_quality 21` cannot be built at all.
 - **Zero third-party Go dependencies.** Routing uses the standard library
   `net/http` (Go 1.22+ method and wildcard patterns), live updates use
   `text/event-stream` (SSE), and the queue and cancellation use `context`. No web
@@ -106,6 +115,11 @@ frontend            React frontend (no UI component library, no CSS framework)
   rules on both frontend and backend — in two sets, POSIX and cmd, picked by the
   server's platform — so the command you preview is the one that runs, and it means
   the same thing when pasted into the server's shell.
+- **Encoder options come in two groups**: "shared encoding options" (from the
+  context sections of `ffmpeg -h full`) and "encoder-specific options" (from
+  `ffmpeg -h encoder=<name>`). Both land in the same per-stream settings and both
+  are emitted right after `-c:<stream>`, so command generation never has to know
+  which layer an option came from.
 - **The form keeps what you typed.** Every field in the workspace and batch views
   is stored in `localStorage` through one hook, so switching sections or reloading
   the page no longer wipes a half-filled command. Stored data is normalised on
@@ -360,8 +374,14 @@ differ (the UHD 630 only encodes HEVC up to 8-bit, while the DG1 handles 10-bit)
 cd frontend
 npm install
 npm run typecheck
+npm test                                       # end-to-end command generation
 API_TARGET=http://127.0.0.1:8090 npm run dev   # start the backend separately on 8090
 ```
+
+`npm test` pulls in no test framework: it compiles `args.ts` and `recipe.ts` to
+CommonJS in a system temp directory using the `tsc` already in the repo, then
+asserts "one set of settings → the final argv" with `node:test` — and actually
+runs the generated command when FFmpeg is installed locally.
 
 `API_TARGET` belongs to the frontend toolchain (it is only read by the dev proxy in
 `vite.config.ts`), so it does not carry the `FFMPEG_REMOTE_UI_` prefix.
@@ -375,6 +395,7 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # start the backend separately on
 | POST | `/api/ffmpeg/refresh` | Re-query capabilities (after changing FFmpeg versions) |
 | GET | `/api/ffmpeg/help?target=&name=` | Structured `ffmpeg -h` result plus raw output |
 | GET | `/api/ffmpeg/cli?level=` | ffmpeg's own command-line topology: sections → options, with the scope and media type read out of each section title |
+| GET | `/api/ffmpeg/option-groups` | FFmpeg's shared-context AVOptions (the `AVCodecContext` and friends in `ffmpeg -h full`): the layer every encoder shares and no single component owns |
 | GET | `/api/ffmpeg/extensions?target=` | File extensions ffmpeg declares for `demuxer` (input side) or `muxer` (output side) |
 | GET | `/api/probe?path=` | Server-side ffprobe |
 | GET | `/api/files?path=` | Directory listing (size, mtime, extension); without `path` it returns the entry points (the media roots, or the filesystem roots when none are configured) |

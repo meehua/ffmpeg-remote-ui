@@ -175,7 +175,7 @@ libx264 AVOptions:
 	if !preset.HasDefault || preset.Default != "medium" {
 		t.Errorf("默认值应去掉引号: %#v", preset)
 	}
-	if preset.Scope != "encoding" || preset.Media != "video" {
+	if preset.Scope != "encoding" || !reflect.DeepEqual(preset.Media, []string{"video"}) {
 		t.Errorf("flags 语义解析错误: %#v", preset)
 	}
 	if preset.Description != "Set the encoding preset" {

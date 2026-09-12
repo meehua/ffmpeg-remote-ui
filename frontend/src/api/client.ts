@@ -4,6 +4,7 @@ import type {
   ConfigInfo,
   ExtensionsResult,
   FFHelp,
+  FFOptionGroups,
   FilesResponse,
   HardwareInfo,
   Health,
@@ -148,6 +149,15 @@ export const api = {
     request<HelpResponse>(`/api/ffmpeg/help${query({ target, name })}`).then(
       (response): HelpResponse => response ?? {},
     ),
+
+  /**
+   * ffmpeg 的公共上下文 AVOptions（来自 `ffmpeg -h full`）。
+   *
+   * 与 `help('encoder', …)` 是两处不同的来源：那边是编码器自己注册的参数，
+   * 这边是所有编解码器共享的那批（-global_quality、-b、-maxrate…）。
+   * 界面把两者拼起来，才是「这个编码器真正能用的参数」。
+   */
+  optionGroups: () => request<FFOptionGroups>('/api/ffmpeg/option-groups'),
 
   probe: (path: string) => request<MediaInfo>(`/api/probe${query({ path })}`),
 

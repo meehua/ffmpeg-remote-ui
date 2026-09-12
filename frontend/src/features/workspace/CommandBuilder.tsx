@@ -6,8 +6,10 @@ import type {
   CliOption,
   CliSection,
   FFOption,
+  FFOptionGroups,
   GpuDevice,
   HWProbe,
+  OptionMedia,
   Snapshot,
 } from '../../api/types';
 import { Button, Field, Select, Switch, TextInput } from '../../components/Controls';
@@ -157,6 +159,13 @@ export function CommandBuilder({
   const { t } = useI18n();
   const streamKinds = useMemo(() => streamKindsOf(cliHelp), [cliHelp]);
 
+  // ffmpeg 的公共上下文选项（`-h full` 里的 AVCodecContext 等）。它与具体
+  // 编码器无关，所以整块只取一次，再按每路流的媒体类型筛出适用的那部分。
+  //
+  // 少了这一层，界面上的「编码器参数」就只是「编码器私有参数」：
+  // `-c:v hevc_qsv -global_quality 21` 里的 global_quality 根本进不来。
+  const codecGroups = useAsync(() => api.optionGroups(), []);
+
   const setHwDevice = (patch: Partial<EncodeSettings['hwDevice']>) =>
     onChange({ ...settings, hwDevice: { ...settings.hwDevice, ...patch } });
 
@@ -278,11 +287,16 @@ export function CommandBuilder({
         </>
       ) : null}
 
+      {/* 公共上下文层取不到时会少掉一整层参数，那是「FFmpeg 说得出、界面看不到」
+          的老毛病又回来了，所以这里必须显式报出来，而不是让它静默地少一块。 */}
+      {codecGroups.error ? <ErrorNote>{codecGroups.error.message}</ErrorNote> : null}
+
       {streamKinds.map((kind) => (
         <StreamEditor
           key={kind.spec}
           kind={kind}
           snapshot={snapshot}
+          codecGroups={codecGroups.data}
           stream={settings.streams[kind.spec] ?? emptyStream}
           onChange={(next) =>
             onChange({ ...settings, streams: { ...settings.streams, [kind.spec]: next } })
@@ -304,12 +318,14 @@ export function CommandBuilder({
 interface StreamEditorProps {
   kind: StreamKindInfo;
   snapshot: Snapshot;
+  /** ffmpeg 的公共上下文选项（`-h full`）；还没取到时为 null。 */
+  codecGroups: FFOptionGroups | null;
   stream: StreamSetting;
   onChange: (next: StreamSetting) => void;
 }
 
 /** 一路流的编码器与它的参数。 */
-function StreamEditor({ kind, snapshot, stream, onChange }: StreamEditorProps) {
+function StreamEditor({ kind, snapshot, codecGroups, stream, onChange }: StreamEditorProps) {
   const { t } = useI18n();
   const flag = MEDIA_FLAG[kind.media] ?? '';
   const encoders = useMemo(
@@ -346,6 +362,8 @@ function StreamEditor({ kind, snapshot, stream, onChange }: StreamEditorProps) {
           label={t('builder.stream.options', { codec: stream.codec })}
           target="encoder"
           name={stream.codec}
+          media={kind.media}
+          codecGroups={codecGroups}
           values={stream.options}
           onChange={(options) => onChange({ ...stream, options })}
         />
@@ -586,24 +604,60 @@ interface OptionSectionProps {
   label: string;
   target: string;
   name: string;
+  /** 这类流的媒体类型，用来筛公共上下文层里的适用项。 */
+  media: string;
+  /** ffmpeg 的公共上下文选项（`-h full` 的 codec 层）。 */
+  codecGroups: FFOptionGroups | null;
   values: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
 }
 
-function OptionSection({ label, target, name, values, onChange }: OptionSectionProps) {
+/**
+ * 一个组件的参数区。
+ *
+ * 参数来自两处**不同**的来源，所以分成两组摆，而不是并成一张表：
+ *
+ *   - 编码器自己注册的那层（`ffmpeg -h encoder=<名>`）：crf、preset、low_power…
+ *   - ffmpeg 的公共上下文层（`ffmpeg -h full` 的 AVCodecContext）：global_quality、
+ *     b、maxrate、profile… 它们对每个编码器都成立，因此不在上面那份输出里。
+ *
+ * 两层合起来才是「这个编码器真正能用的参数」。并成一张表就等于把「这属于谁」
+ * 又丢了——同一个名字在两层里的说明与默认值未必相同。
+ */
+function OptionSection({
+  label,
+  target,
+  name,
+  media,
+  codecGroups,
+  values,
+  onChange,
+}: OptionSectionProps) {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
   const query = useDebounced(search, 150).trim().toLowerCase();
   const help = useAsync(() => api.help(target, name), [target, name]);
 
-  const options = help.data?.help?.options ?? [];
-  const filtered = query === ''
-    ? options
-    : options.filter(
-        (option) =>
-          option.name.toLowerCase().includes(query) ||
-          (option.description ?? '').toLowerCase().includes(query),
-      );
+  const own = help.data?.help?.options ?? [];
+  const common = useMemo(() => commonCodecOptions(codecGroups, media), [codecGroups, media]);
+
+  // 两层里同名的选项只算一次，且算在编码器私有层上：它更具体，说明与默认值
+  // 都贴着这个编码器。去掉重名之后，公共层这一组就只剩这个编码器真正独有
+  // 不到的那些通用参数（global_quality、b、maxrate…）。
+  //
+  // 渲染顺序是宽 → 窄：先「所有编码器共享的」，再「这个编码器自己的」。
+  const ownNames = useMemo(() => new Set(own.map((option) => option.name)), [own]);
+  const shared = useMemo(
+    () => common.options.filter((option) => !ownNames.has(option.name)),
+    [common, ownNames],
+  );
+
+  const matches = (option: FFOption) =>
+    query === '' ||
+    option.name.toLowerCase().includes(query) ||
+    (option.description ?? '').toLowerCase().includes(query);
+  const ownShown = own.filter(matches);
+  const sharedShown = shared.filter(matches);
 
   const assigned = Object.entries(values).filter(([, value]) => value.trim() !== '');
 
@@ -622,7 +676,9 @@ function OptionSection({ label, target, name, values, onChange }: OptionSectionP
       <header className={styles.sectionHead}>
         <h3 className={styles.sectionTitle}>{label}</h3>
         <span className={styles.sectionMeta}>
-          {help.loading ? t('common.reading') : t('builder.options.count', { count: options.length })}
+          {help.loading
+            ? t('common.reading')
+            : t('builder.options.count', { count: own.length + shared.length })}
         </span>
       </header>
 
@@ -658,28 +714,108 @@ function OptionSection({ label, target, name, values, onChange }: OptionSectionP
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      {!help.loading && filtered.length === 0 ? (
+      {!help.loading && ownShown.length === 0 && sharedShown.length === 0 ? (
         <p className={styles.sectionMeta}>{t('builder.options.noMatch')}</p>
       ) : null}
 
-      {/* 参数是平铺的，一个编码器动辄上百项——限高之后交给它自己滚：宽屏时不再
-          把这一栏撑到几千像素；窄屏不受影响，照旧跟着文档流走。
-          上限取 min(50vh, 24rem)：屏幕矮时按视口走，屏幕高时不超过 24rem，
-          免得一个参数列表就把这一栏里后面的大块挤出视线。 */}
-      <ScrollArea label={label} maxBlockSize="min(50vh, 24rem)">
+      {sharedShown.length > 0 ? (
+        <OptionList
+          title={t('builder.options.shared.title')}
+          hint={t('builder.options.shared.hint', { component: common.component })}
+          options={sharedShown}
+          values={values}
+          onChange={setValue}
+        />
+      ) : null}
+
+      {ownShown.length > 0 ? (
+        <OptionList
+          title={t('builder.options.own.title')}
+          hint={t('builder.options.own.hint', { codec: name })}
+          options={ownShown}
+          values={values}
+          onChange={setValue}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * 从公共上下文层里挑出适用于这类流的编码选项。
+ *
+ * 两个判据都来自 FFmpeg 写在选项上的 flags，不是这里另立的规则：
+ *
+ *   - scope：只留编码侧可用的（encoding / shared）；解码专用的与编码无关。
+ *   - media：留「没限定媒体」的，以及限定里含这类流的。空表示 FFmpeg 没有
+ *     限定——那是「不知道」，不是「不适用」，所以保留而不是丢掉。
+ */
+function commonCodecOptions(
+  groups: FFOptionGroups | null,
+  media: string,
+): { component: string; options: FFOption[] } {
+  if (!groups) {
+    return { component: '', options: [] };
+  }
+  const out: FFOption[] = [];
+  let component = '';
+  for (const group of groups.groups) {
+    if (group.component !== 'codec') {
+      continue;
+    }
+    if (component === '') {
+      component = group.name;
+    }
+    for (const option of group.options) {
+      if (option.scope !== undefined && option.scope !== 'encoding' && option.scope !== 'shared') {
+        continue;
+      }
+      const medias = option.media ?? [];
+      if (medias.length > 0 && !medias.includes(media as OptionMedia)) {
+        continue;
+      }
+      out.push(option);
+    }
+  }
+  return { component, options: out };
+}
+
+interface OptionListProps {
+  title: string;
+  hint: string;
+  options: FFOption[];
+  values: Record<string, string>;
+  onChange: (optionName: string, value: string) => void;
+}
+
+/**
+ * 一组参数的列表。
+ *
+ * 限高之后交给它自己滚：一个编码器动辄上百项，宽屏时不再把这一栏撑到几千像素；
+ * 窄屏不受影响，照旧跟着文档流走。上限取 min(50vh, 24rem)：屏幕矮时按视口走，
+ * 屏幕高时不超过 24rem，免得一个参数列表就把这一栏里后面的大块挤出视线。
+ */
+function OptionList({ title, hint, options, values, onChange }: OptionListProps) {
+  return (
+    <div className={styles.optionGroup}>
+      <p className={styles.optionGroupHead}>
+        <span className={styles.optionGroupTitle}>{title}</span>
+        <span className={styles.sectionMeta}>{hint}</span>
+      </p>
+      <ScrollArea label={title} maxBlockSize="min(50vh, 24rem)">
         <ul className={styles.options}>
-          {filtered.map((option) => (
+          {options.map((option) => (
             <li key={option.name}>
               <OptionRow
                 option={option}
                 value={values[option.name] ?? ''}
-                onChange={(value) => setValue(option.name, value)}
+                onChange={(value) => onChange(option.name, value)}
               />
             </li>
           ))}
         </ul>
       </ScrollArea>
-    </section>
+    </div>
   );
 }
 

@@ -116,13 +116,22 @@ type Section struct {
 
 // Option 是单个 AVOption。
 type Option struct {
-	Name        string `json:"name"`
-	Type        string `json:"type,omitempty"`
-	Flags       string `json:"flags,omitempty"` // 原始 flags 列，例如 "E..V......P"
-	Scope       string `json:"scope,omitempty"` // encoding / decoding / shared
-	Media       string `json:"media,omitempty"` // video / audio / subtitle / data
-	Runtime     bool   `json:"runtime,omitempty"`
-	PerStream   bool   `json:"perStream,omitempty"`
+	Name  string `json:"name"`
+	Type  string `json:"type,omitempty"`
+	Flags string `json:"flags,omitempty"` // 原始 flags 列，例如 "E..V......P"
+	// Component 是这个选项属于哪一层组件：codec / format / io / url…
+	// 只有公共上下文分节（见 optiongroups.go）带上它；`-h <target>=<名>`
+	// 返回的选项本身就是那个组件自己的，因此为空。
+	Component string `json:"component,omitempty"`
+	Scope     string `json:"scope,omitempty"` // encoding / decoding / shared
+	// Media 是这个选项适用的媒体类型；空表示 FFmpeg 没有限定。
+	//
+	// 它是复数：flags 的媒体位是并列的，`-b` 的 "E..VA......" 表示视频与
+	// 音频都能用。只取一位会把「通用」误报成「视频专属」——音频流下就再也
+	// 看不到它了。
+	Media       []string `json:"media,omitempty"`
+	Runtime     bool     `json:"runtime,omitempty"`
+	PerStream   bool     `json:"perStream,omitempty"`
 	Description string `json:"description,omitempty"`
 	HasDefault  bool   `json:"hasDefault,omitempty"`
 	Default     string `json:"default,omitempty"`
@@ -177,19 +186,21 @@ type Service struct {
 	mu   sync.RWMutex
 	snap Snapshot
 
-	helpMu   sync.Mutex
-	help     map[string]Help
-	cliCache map[string]CliHelp
-	extCache map[string]ExtensionsResult
+	helpMu     sync.Mutex
+	help       map[string]Help
+	cliCache   map[string]CliHelp
+	extCache   map[string]ExtensionsResult
+	groupCache map[string]OptionGroups
 }
 
 func NewService(ffmpegPath, ffprobePath string) *Service {
 	s := &Service{
-		ffmpeg:   ffmpegPath,
-		ffprobe:  ffprobePath,
-		help:     map[string]Help{},
-		cliCache: map[string]CliHelp{},
-		extCache: map[string]ExtensionsResult{},
+		ffmpeg:     ffmpegPath,
+		ffprobe:    ffprobePath,
+		help:       map[string]Help{},
+		cliCache:   map[string]CliHelp{},
+		extCache:   map[string]ExtensionsResult{},
+		groupCache: map[string]OptionGroups{},
 	}
 	_ = s.Refresh()
 	return s
@@ -277,12 +288,13 @@ func (s *Service) Refresh() error {
 	s.mu.Unlock()
 
 	// 换过 FFmpeg 之后，先前按旧二进制缓存下来的东西全部作废：
-	// 组件的 -h、命令行拓扑、扩展名汇总都会随版本变。
+	// 组件的 -h、命令行拓扑、扩展名汇总、公共上下文分节都会随版本变。
 	// 少了这一步，用户点了「重新查询能力」，命令行选项面板却还是旧的。
 	s.helpMu.Lock()
 	s.help = map[string]Help{}
 	s.cliCache = map[string]CliHelp{}
 	s.extCache = map[string]ExtensionsResult{}
+	s.groupCache = map[string]OptionGroups{}
 	s.helpMu.Unlock()
 	return nil
 }
@@ -588,7 +600,11 @@ var (
 	sectionRE = regexp.MustCompile(`^(\S.*?)\s+AVOptions:\s*$`)
 	// flags 列用 [A-Z.] 宽松匹配：滤镜还会带 F（AV_OPT_FLAG_FILTERING_PARAM），
 	// 例如 "..FV.....T."；把字母表写死会漏掉整类参数。
-	optionRE = regexp.MustCompile(`^\s{1,3}-?([A-Za-z][A-Za-z0-9_.-]*)\s+<([^<>]*)>\s+([A-Z.]{4,})\s*(.*)$`)
+	//
+	// 占位符与 flags 之间用 \s* 而不是 \s+：FFmpeg 会写出 `[<int>     ]` 这种
+	// 带方括号的畸形占位符（-side_data_prefer_packet），去壳之后它紧贴 flags。
+	// 去壳在 normalizeOptionLine 里做，这条规则因此也能吃下那种形态。
+	optionRE = regexp.MustCompile(`^\s{1,3}-?([A-Za-z][A-Za-z0-9_.-]*)\s+<([^<>]*)>\s*([A-Z.]{4,})\s*(.*)$`)
 	valueRE  = regexp.MustCompile(`^\s{4,}(\S+)\s+(\S*)\s+([A-Z.]{4,})\s*(.*)$`)
 	propRE   = regexp.MustCompile(`^\s{2,}([A-Z][A-Za-z0-9 /-]*[A-Za-z0-9]):\s*(.*)$`)
 	streamRE = regexp.MustCompile(`^#(\d+):\s*(.*)$`)
@@ -705,7 +721,7 @@ func parseHelp(target, name, raw string) Help {
 			continue
 		}
 
-		if m := optionRE.FindStringSubmatch(line); m != nil {
+		if m := optionRE.FindStringSubmatch(normalizeOptionLine(line)); m != nil {
 			opt := Option{Name: m[1], Type: m[2], Flags: m[3], Description: strings.TrimSpace(m[4])}
 			finishOption(&opt)
 			if section == nil {
@@ -732,30 +748,42 @@ func parseHelp(target, name, raw string) Help {
 	return h
 }
 
+// mediaFlags 是 flags 列里媒体位的位置、字符与含义。
+//
+// flags 是一列固定的字符模板：0=encoding、1=decoding、2=filtering、
+// 3..6=媒体。媒体位是并列的——`-b` 的 "E..VA......" 表示视频与音频都能用，
+// 因此必须整列扫，不能只看某一位，否则「通用」会被误报成「视频专属」，
+// 音频流下就再也看不到这个选项。
+var mediaFlags = []struct {
+	index int
+	flag  byte
+	media string
+}{
+	{3, 'V', "video"},
+	{4, 'A', "audio"},
+	{5, 'S', "subtitle"},
+	{6, 'D', "data"},
+}
+
 // finishOption 把描述里的结构化信息抽出来，并从描述中移除，
 // 使界面既能显示干净的说明，又能单独呈现默认值与取值范围。
 func finishOption(o *Option) {
 	f := strings.TrimSpace(o.Flags)
-	if len(f) > 0 {
-		switch f[0] {
-		case 'E':
-			o.Scope = "encoding"
-		case 'D':
-			o.Scope = "decoding"
-		default:
-			o.Scope = "shared"
-		}
+	// E 与 D 同时出现表示编解码两侧都能设（例如 -flags），那既不是
+	// 「编码专用」也不是「解码专用」，而是两侧共有。
+	switch {
+	case strings.HasPrefix(f, "ED"):
+		o.Scope = "shared"
+	case strings.HasPrefix(f, "E"):
+		o.Scope = "encoding"
+	case strings.HasPrefix(f, "D") || (len(f) > 1 && f[1] == 'D'):
+		o.Scope = "decoding"
+	default:
+		o.Scope = "shared"
 	}
-	if len(f) > 3 {
-		switch f[3] {
-		case 'V':
-			o.Media = "video"
-		case 'A':
-			o.Media = "audio"
-		case 'S':
-			o.Media = "subtitle"
-		case 'D':
-			o.Media = "data"
+	for _, m := range mediaFlags {
+		if len(f) > m.index && f[m.index] == m.flag {
+			o.Media = append(o.Media, m.media)
 		}
 	}
 	o.Runtime = strings.Contains(f, "T")

@@ -17,6 +17,12 @@ GPU 与任务队列全部位于运行程序的服务器上；浏览器既不转�
   以及每个组件的可调参数、取值、默认值与取值范围，全部来自运行时查询
   （`ffmpeg -encoders`、`ffmpeg -h encoder=…` …）。代码里没有任何内置能力表，
   所以服务器上的 FFmpeg 升级后，界面自动跟着变。
+- **参数分两层，界面也分两层。** `ffmpeg -h encoder=<名>` 只回答「这个编码器自己
+  注册了哪些参数」（x264 的 `-crf`、QSV 的 `-low_power`）；而 `-global_quality`、
+  `-b`、`-maxrate`、`-profile` 这些由 libavcodec 定义、**所有编码器共享**的参数挂在
+  `AVCodecContext` 上，只出现在 `ffmpeg -h full` 的公共上下文分节里。程序把那份分节
+  按组件层（codec / format / io / url）解析成独立来源，与编码器私有参数分两组展示；
+  少了这一层，`-c:v hevc_qsv -global_quality 21` 这种完全合法的命令就拼不出来。
 - **零第三方 Go 依赖。** 路由用标准库 `net/http`（Go 1.22+ 的方法与通配模式），
   实时推送用 `text/event-stream`（SSE），队列与取消用 `context`。没有 Web 框架、
   没有 ORM、没有 WebSocket 库。
@@ -88,6 +94,9 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   命令行；`shellQuote` 与 `SplitArgs` 在前端和后端是同一套规则，而且两边都按服务器
   平台分 POSIX 与 cmd 两份实现，因此预览到的命令与实际执行的一致，粘到服务器的
   终端里也是同一个意思。
+- **编码器参数分两组**：「通用编码选项」与「编码器专属选项」——前者来自
+  `ffmpeg -h full` 的公共上下文分节，后者来自 `ffmpeg -h encoder=<名>`。两组都写进
+  同一份流设置，生成时都跟在 `-c:<流>` 之后，所以命令生成这一侧完全不需要知道来源。
 - **表单填过的东西不会白填**：工作区与批处理的每个字段都经同一个 hook 存进
   浏览器本地存档，切换功能域或刷新页面都不再清空；读回时会先归一化，旧存档或
   坏存档退回默认值，而不是把界面弄崩。
@@ -310,8 +319,13 @@ ffmpeg -hide_banner -init_hw_device qsv=hw,child_device=/dev/dri/renderD129 \
 cd frontend
 npm install
 npm run typecheck
+npm test                                       # 命令生成的端到端测试
 API_TARGET=http://127.0.0.1:8090 npm run dev   # 后端另行启动在 8090
 ```
+
+`npm test` 不引入测试框架：它用仓库里已有的 `tsc` 把 `args.ts` 与 `recipe.ts` 编成
+CommonJS 到系统临时目录，再用 `node:test` 断言「一份设置 → 最终 argv」，并在本机装了
+FFmpeg 时真跑一次生成的命令。
 
 `API_TARGET` 属于前端工具链（只被 `vite.config.ts` 的 dev 代理读取），
 所以没有加 `FFMPEG_REMOTE_UI_` 前缀。
@@ -325,6 +339,7 @@ API_TARGET=http://127.0.0.1:8090 npm run dev   # 后端另行启动在 8090
 | POST | `/api/ffmpeg/refresh` | 重新查询能力（换过 FFmpeg 版本后） |
 | GET | `/api/ffmpeg/help?target=&name=` | `ffmpeg -h` 的结构化结果 + 原始输出 |
 | GET | `/api/ffmpeg/cli?level=` | ffmpeg 自己的命令行拓扑：分节 → 选项，作用范围与媒体类型从分节标题读出 |
+| GET | `/api/ffmpeg/option-groups` | FFmpeg 的公共上下文 AVOptions（`ffmpeg -h full` 里的 `AVCodecContext` 等）：所有编码器共享、不属于某一个组件的那层参数 |
 | GET | `/api/ffmpeg/extensions?target=` | ffmpeg 声明的文件扩展名：`demuxer`（输入侧）或 `muxer`（输出侧） |
 | GET | `/api/probe?path=` | 服务器端 ffprobe |
 | GET | `/api/files?path=` | 目录浏览（含大小、修改时间、扩展名）；不带 `path` 时给出入口列表（媒体根目录；未配置时是文件系统根） |

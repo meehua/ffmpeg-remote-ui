@@ -97,6 +97,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/ffmpeg", s.ffmpegInfo)
 	mux.HandleFunc("GET /api/ffmpeg/help", s.ffmpegHelp)
 	mux.HandleFunc("GET /api/ffmpeg/cli", s.ffmpegCli)
+	mux.HandleFunc("GET /api/ffmpeg/option-groups", s.ffmpegOptionGroups)
 	mux.HandleFunc("GET /api/ffmpeg/extensions", s.ffmpegExtensions)
 	mux.HandleFunc("POST /api/ffmpeg/refresh", s.ffmpegRefresh)
 	mux.HandleFunc("GET /api/probe", s.probe)

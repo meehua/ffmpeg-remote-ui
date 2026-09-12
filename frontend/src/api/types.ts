@@ -60,8 +60,16 @@ export interface FFOption {
   name: string;
   type?: string;
   flags?: string;
+  /**
+   * 这个选项属于哪一层组件：codec / format / io / url。
+   *
+   * 只有公共上下文分节（见 FFOptionGroup）会带上它；`-h <target>=<名>`
+   * 返回的选项本身就是那个组件自己的，因此为空。
+   */
+  component?: string;
   scope?: OptionScope;
-  media?: OptionMedia;
+  /** 适用的媒体类型；空表示 FFmpeg 没有限定。可以同时勾中多种（-b 就是视频+音频）。 */
+  media?: OptionMedia[];
   runtime?: boolean;
   perStream?: boolean;
   description?: string;
@@ -77,6 +85,27 @@ export interface FFOption {
 export interface FFSection {
   name: string;
   options: FFOption[];
+}
+
+/**
+ * `ffmpeg -h full` 里的一个「公共上下文」AVOptions 分节。
+ *
+ * 这是与 `-h encoder=<名>` 并列的另一处参数来源：libav* 把一组组件共享的
+ * 选项挂在 <X>Context 上（AVCodecContext 的 global_quality、b、maxrate…），
+ * 它们不属于任何具体编码器，因此不会出现在 `-h encoder=<名>` 的输出里。
+ */
+export interface FFOptionGroup {
+  /** FFmpeg 的原文分节名，例如 "AVCodecContext AVOptions"。 */
+  name: string;
+  /** 分节名里那个上下文对应的组件层：codec / format / io / url。 */
+  component: string;
+  options: FFOption[];
+}
+
+/** `ffmpeg -h full` 里全部的公共上下文分节。 */
+export interface FFOptionGroups {
+  level: string;
+  groups: FFOptionGroup[];
 }
 
 export interface FFStreamPort {
