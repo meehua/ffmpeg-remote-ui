@@ -148,15 +148,24 @@ frontend            React frontend (no UI component library, no CSS framework)
   its path relative to the scanned root, and the output directories are created
   before the jobs are submitted — FFmpeg itself never creates them. Extensions
   stay the job of the naming settings, not of the structure.
-- **Hardware devices can be chosen explicitly**: the device type comes from
-  `ffmpeg -init_hw_device list`, and picking one emits
-  `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device initialization
-  is a global option and loses its meaning after the input. What `<node>` means is
+- **Hardware devices can be chosen explicitly, one per side**: input and output
+  each pick their own device type (from `ffmpeg -init_hw_device list`) and node,
+  and either side may be left empty. A side that names one emits its own
+  `-init_hw_device` *before* `-i` — initialization is a global option and loses its
+  meaning after the input — and is then *named* on that side, which initialization
+  alone cannot do: FFmpeg creates the device without remembering what it was for.
+  The input side is named with `-hwaccel <type> -hwaccel_device <name>` (both
+  input-only); the output side with the type's own option, the `<type>_device`
+  entries in ffmpeg's own help (e.g. `-qsv_device <node>`). The
+  `-filter_hw_device` FFmpeg mentions when several devices exist only feeds filter
+  graphs, so it is used only for types that have no such option. What `<node>` means is
   decided by FFmpeg, per type, and the same value does not mean the same thing
   across types: `1` is the second NVIDIA card for `cuda`, the second DXGI adapter
   for `d3d11va`, and the "software implementation" selector for `qsv` (`qsv=hw:1`
   fails with `Error creating a MFX session: -9`, nothing to do with which card —
-  qsv takes its adapter from its own `child_device` option). So the node is neither
+  qsv takes its adapter from its own `child_device` option, and a render node put
+  in the `device` position instead is read as an implementation selector and
+  silently dropped, which sends every card back to the default one). So the node is neither
   pre-filled nor inferred: the drop-down lists one row per device the server found —
   the same names the hardware page uses, the model first and the vendor:device ID
   after it — and only devices the server itself named are listed, because that name
@@ -318,8 +327,8 @@ id                         # whether the account is in render / video
 
 The `by-path` step is especially handy: integrated GPUs usually sit at
 `0000:00:02.0` and discrete ones on a slot address, so you can tell at a glance
-which node is which GPU — this is exactly the mapping the "hardware device"
-selector in the UI shows.
+which node is which GPU — this is exactly the mapping the device-node drop-downs
+under "input hardware type" / "output hardware type" show.
 
 The program also displays **model names** (for instance
 `DG1 [Iris Xe MAX Graphics]`), resolved from the system PCI ID database
@@ -352,9 +361,10 @@ to be passed through:
 docker run --device /dev/dri:/dev/dri --group-add render --group-add video …
 ```
 
-Once permissions work, pick a hardware device type (`qsv`, `vaapi`, …) and a node in
-the "encoding parameters" panel, and it will emit
-`-init_hw_device <type>=hw:<node>`. What `<node>` means depends on the type, though:
+Once permissions work, pick a type (`qsv`, `vaapi`, …) and a node for each side in
+the "encoding parameters" panel: the builder creates the device and names it for
+what it is there for — `-hwaccel … -hwaccel_device …` for decoding,
+`-qsv_device <node>` and friends for encoding. What `<node>` means depends on the type, though:
 `vaapi` takes the DRM node path while `qsv` takes an MFX implementation selector and
 names its adapter through the `child_device` option. So when in doubt, read the
 FFmpeg output the "Test which combinations work" button gives you, copy it into a

@@ -117,13 +117,19 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   那份列表）并填入列表；打开「还原原目录结构」后，每个输出按相对扫描根的路径落位，
   输出目录会在提交前建好——FFmpeg 自己不会创建目录。扩展名始终归命名设置管，
   与结构还原无关。
-- **硬件设备可显式指定**：设备类型取自 `ffmpeg -init_hw_device list`，选中后生成
-  `-init_hw_device <type>=hw:<node>`，并放在 `-i` 之前——设备初始化是全局选项，放在
-  输入之后就失去语义了。`<node>` 那一段是什么意思由 FFmpeg 按类型解释，而且同一个值
+- **硬件设备可显式指定，输入输出各一个**：两侧各自选自己的类型（取自
+  `ffmpeg -init_hw_device list`）与节点，也都可以留空。填了的那一侧会生成自己的
+  `-init_hw_device`，放在 `-i` 之前——设备初始化是全局选项，放在输入之后就失去语义
+  了——并且要在那一侧**指名**，这一步光有初始化做不到：FFmpeg 只把设备创建出来，不记得
+  它是给谁用的。输入侧用 `-hwaccel <type> -hwaccel_device <name>` 指名（两个都是
+  input-only 的选项）；输出侧用该类型自己的选项——在 ffmpeg 的帮助里它们是
+  `<类型>_device` 这一组名字（例如 `-qsv_device <node>`）。FFmpeg 在多设备时提到的
+  `-filter_hw_device` 只管滤镜，所以只在没有这种选项的类型上才用它。`<node>` 那一段是什么意思由 FFmpeg 按类型解释，而且同一个值
   在不同类型里指的不是一回事：`1` 在 `cuda` 里是第 1 块 NVIDIA 卡，在 `d3d11va` 里是
   第 1 个 DXGI 适配器，在 `qsv` 里却是 MFX 的实现选择符（`qsv=hw:1` 报
   `Error creating a MFX session: -9`，与哪块卡无关——qsv 挑适配器要用它自己的
-  `child_device` 选项）。所以节点既不预填也不推断：下拉按服务器发现的设备一行一台列
+  `child_device` 选项；把渲染节点写进 `device` 位置会被当成实现选择符静默丢掉，于是
+  每块卡都退回默认那块）。所以节点既不预填也不推断：下拉按服务器发现的设备一行一台列
   出来——名字与「硬件」页同一套，型号在前、厂商:设备ID 在后——而且只列服务器自己给出
   了名字的那些，因为那个名字就是能填进 `-init_hw_device` 的值（Linux 上的
   `/dev/dri/renderD128` 就是）。服务器给不出名字的设备就不列：Windows 上的显示适配器
@@ -272,7 +278,7 @@ id                         # 当前账户是否在 render / video 组里
 ```
 
 `by-path` 那步尤其有用：核显通常在 `0000:00:02.0`，独显在插槽地址上，一眼就能
-看出哪个节点是哪块 GPU——程序里「硬件设备」选择器展示的就是这个对应关系。
+看出哪个节点是哪块 GPU——程序里「输入硬件类型 / 输出硬件类型」下面那两格设备节点展示的就是这个对应关系。
 
 程序还会显示**型号名**（例如 `DG1 [Iris Xe MAX Graphics]`），来源是系统的 PCI ID
 数据库（`/usr/share/{misc,hwdata}/pci.ids` 等常见位置）。型号只用于辨认设备，
@@ -299,8 +305,9 @@ sudo vainfo --display drm --device /dev/dri/renderD128
 docker run --device /dev/dri:/dev/dri --group-add render --group-add video …
 ```
 
-权限通了之后，在「编码参数」面板选硬件设备类型（`qsv`、`vaapi`…）与节点，即可
-生成 `-init_hw_device <type>=hw:<node>`。不过 `<node>` 的含义按类型而定：`vaapi` 收的
+权限通了之后，在「编码参数」面板给输入侧、输出侧各选类型（`qsv`、`vaapi`…）与节点：
+构建器会创建设备，并按它的用途指名——解码用 `-hwaccel … -hwaccel_device …`，编码用
+`-qsv_device <节点>` 这类该类型自己的选项。不过 `<node>` 的含义按类型而定：`vaapi` 收的
 就是 DRM 节点路径，`qsv` 收的却是 MFX 实现选择符，它的适配器要用 `child_device`
 选项指定。拿不准时先实测一次，再把结论那一项上悬浮出来的 FFmpeg 原文照抄成最小命令
 确认编码器真的可用，然后才去跑长任务：
