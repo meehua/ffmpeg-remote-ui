@@ -167,10 +167,18 @@ func (m MediaInfo) Duration() time.Duration {
 
 // helpTargets 是 `ffmpeg -h` 承认的目标类型。这里只做结构性校验，
 // 不涉及任何具体组件名。
+//
+// 这份清单必须与 ffmpeg 自己的说法一致：`-h` 的用法行写着
+// "type=name -- print all options for the named decoder/encoder/demuxer/
+// muxer/filter/bsf/protocol"。device、input、output、hwaccel 不在这句话里，
+// 实测 ffmpeg 8.0.1 对它们一律回 "Unknown help option"：收进来只会让调用点
+// 拿到一个必然失败的 502（ffmpeg 出问题），而真相是请求写错了（400）。
+//
+// 设备（v4l2、decklink…）的选项不另设一层：FFmpeg 把它们实现成 demuxer/
+// muxer，所以 `-h demuxer=v4l2` 就是设备参数的来源。
 var helpTargets = map[string]bool{
 	"encoder": true, "decoder": true, "filter": true, "demuxer": true,
-	"muxer": true, "bsf": true, "protocol": true, "device": true,
-	"input": true, "output": true, "hwaccel": true, "full": true,
+	"muxer": true, "bsf": true, "protocol": true, "full": true,
 }
 
 // commandTimeout 防止某个查询把服务卡住。
