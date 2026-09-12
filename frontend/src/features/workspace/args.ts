@@ -627,6 +627,7 @@ export function buildArgs({
     args.push('-init_hw_device', hwDeviceArg(inputHwType, inputHwName, inputHwDevice));
   }
 
+  let outputHwName = '';
   if (outputHwType !== '') {
     const sameInitialisation =
       inputHwType !== '' && inputHwType === outputHwType && inputHwDevice === outputHwDevice;
@@ -634,18 +635,16 @@ export function buildArgs({
     // 输出侧那块要**两条**指名一起写：它们各管一层，指向的是同一块卡。
     //
     //   - `-filter_hw_device <名>`：文档说它「把命名的设备交给滤镜图」，而输出流的
-    //     编码器正是从滤镜图继承 hw_device_ctx 的——这是「编码器用哪块卡」最直接的
-    //     一步。
+    //     编码器正是从滤镜图继承 hw_device_ctx 的——这是「编码器用哪块卡」最直接的一步。
     //   - 该类型自己的 `<类型>_device <节点>`（ffmpeg 帮助里就是这么命名的，例如
     //     `-qsv_device`）：多卡时官方给的就是它。
     //
-    // 只写其中一条时，编码器在某些情况下仍会落回默认设备（两台机器上的现象都是这样），
-    // 所以两条都写——它们不冲突，指向同一块卡。
-    const name = sameInitialisation ? inputHwName : hwDeviceName(outputHwType, hwNames);
+    // 两条不冲突，所以都写：不同版本上生效的那一层不一样。
+    outputHwName = sameInitialisation ? inputHwName : hwDeviceName(outputHwType, hwNames);
     if (!sameInitialisation) {
-      args.push('-init_hw_device', hwDeviceArg(outputHwType, name, outputHwDevice));
+      args.push('-init_hw_device', hwDeviceArg(outputHwType, outputHwName, outputHwDevice));
     }
-    args.push('-filter_hw_device', name);
+    args.push('-filter_hw_device', outputHwName);
     if (outputHwOption !== undefined && outputHwDevice !== '') {
       args.push(`-${outputHwOption}`, outputHwDevice);
     }
@@ -660,10 +659,16 @@ export function buildArgs({
   }
   appendOptionValues(args, settings.inputFormat.options);
 
-  // 输入侧那块设备用于解码。放在这里是因为 -hwaccel 与 -hwaccel_device 都是
-  // input-only 的选项：它们必须落在所作用的那个输入之前。
-  if (inputHwName !== '') {
-    args.push('-hwaccel', inputHwType, '-hwaccel_device', inputHwName);
+  // `-hwaccel` 与 `-hwaccel_device` 都是 input-only 的选项，所以落在这里（-i 之前）。
+  //
+  // 指向哪一块：**填了输出侧就用输出侧那块**。实测（Linux + QSV）说明这一条决定的正是
+  // 整条硬件管线的设备——`-hwaccel_device` 指哪块，解码与编码就都在哪块，`-filter_hw_device`
+  // 与 `-qsv_device` 都覆盖不了它；而填输出侧的人要的就是「让这块卡编码」。只填输入侧时
+  // 才退回输入侧那块。
+  const accelType = outputHwType !== '' ? outputHwType : inputHwType;
+  const accelName = outputHwType !== '' ? outputHwName : inputHwName;
+  if (accelType !== '' && accelName !== '') {
+    args.push('-hwaccel', accelType, '-hwaccel_device', accelName);
   }
 
   // 解码器必须早于 -i：它作用于这个输入的码流。没指定时整段不生成，

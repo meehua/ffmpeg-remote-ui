@@ -489,11 +489,11 @@ test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的
     'qsv2',
     '-qsv_device',
     '/dev/dri/renderD129',
-    // 输入侧那块用于解码；两条都是 input-only 的选项，所以落在 -i 之前。
+    // 整条硬件管线跟着**输出侧**那块走：两条都是 input-only 的选项，所以落在 -i 之前。
     '-hwaccel',
     'qsv',
     '-hwaccel_device',
-    'qsv',
+    'qsv2',
     '-i',
     'in.mp4',
     'out.mp4',
@@ -518,20 +518,25 @@ test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的
     'cuda=cuda:0',
     '-filter_hw_device',
     'cuda',
+    '-hwaccel',
+    'cuda',
+    '-hwaccel_device',
+    'cuda',
     '-i',
     'in.mp4',
     'out.mp4',
   ]);
 
-  // 只填了类型、没填节点：专用选项没值可给，只留 `-filter_hw_device`。
+  // 只填了类型、没填节点：专用选项没值可给，只剩 `-filter_hw_device`；但管线仍然跟着
+  // 这一侧走——`-hwaccel` 只需要命名设备，不需要节点。
   const typeOnly = { ...args.emptySettings, outputHardware: { type: 'qsv', device: '' } };
   assert.deepEqual(build(typeOnly, '', cliHelpWithQsvDevice).slice(0, 6), [
     '-init_hw_device',
     'qsv=qsv',
     '-filter_hw_device',
     'qsv',
-    '-i',
-    'in.mp4',
+    '-hwaccel',
+    'qsv',
   ]);
 
   // 两侧都留空：一条也不生成，其余照旧。
@@ -558,6 +563,10 @@ test('旧预设里那一个 hwDevice 迁到输出侧', () => {
     'qsv',
     '-qsv_device',
     '0',
+    '-hwaccel',
+    'qsv',
+    '-hwaccel_device',
+    'qsv',
     '-i',
     'in.mp4',
     'out.mp4',
