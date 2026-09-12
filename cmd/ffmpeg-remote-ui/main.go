@@ -1,5 +1,5 @@
-// 命令 ffmpeg-remote-ui 是单文件 Linux 服务端程序：
-// 运行时只需要它自己，以及服务器上的 FFmpeg/FFprobe。
+// 命令 ffmpeg-remote-ui 是单文件服务端程序（Linux 与 Windows 同一份代码）：
+// 运行时只需要它自己，以及机器上的 FFmpeg/FFprobe。
 package main
 
 import (
@@ -22,7 +22,7 @@ import (
 )
 
 // 前端构建产物在构建时嵌入，因此运行时不需要任何静态文件目录。
-// 构建前请先在 frontend 执行 npm run build（见 build.sh）。
+// 构建前请先在 frontend 执行 npm run build（见 build.sh 与 build.ps1）。
 //
 //go:embed web
 var webFS embed.FS
@@ -37,6 +37,10 @@ var (
 )
 
 func main() {
+	// 日志正文是中文，先把控制台编码摆正：Windows 默认的 GBK 代码页会让
+	// 第一行启动日志就变成乱码。别的平台上这个调用什么也不做。
+	setupConsole()
+
 	// --version 给部署脚本用：只输出一行，不启动服务。
 	if isVersionRequest(os.Args[1:]) {
 		fmt.Println(buildInfo())
@@ -139,6 +143,11 @@ func run() error {
 			service.FFmpegPath())
 	}
 
+	// Ctrl+C（Windows 上还有 Ctrl+Break）开始优雅退出。
+	//
+	// syscall.SIGTERM 在 Windows 上不会被投递——那里没有这个信号，列在这里只是
+	// 为了让同一份代码在两个平台上都编译得过。顺带记下一个平台差异：控制台窗口
+	// 被直接关掉时进程会被系统结束，收不到任何退出信号，那种情况下没有机会收尾。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
