@@ -129,7 +129,7 @@ interface DataListProps {
 /**
  * 键值清单。
  *
- * ffprobe 结果、DRM 设备、-h 的元信息都适合用它呈现，
+ * ffprobe 结果、显示设备、-h 的元信息都适合用它呈现，
  * 所以这里用语义化的 dl，而不是堆一堆 div。
  */
 export function DataList({ items, dense }: DataListProps) {

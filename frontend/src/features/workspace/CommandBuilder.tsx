@@ -28,7 +28,7 @@ interface CommandBuilderProps {
   snapshot: Snapshot;
   /** ffmpeg 自己的命令行拓扑（`ffmpeg -h`）；控件的结构完全跟着它。 */
   cliHelp: CliHelp | null;
-  /** 服务器上真实存在的 DRM 设备，用作硬件设备节点候选。 */
+  /** 服务器上真实存在的显示设备，用作硬件设备节点候选。 */
   devices: GpuDevice[];
   settings: EncodeSettings;
   onChange: (next: EncodeSettings) => void;

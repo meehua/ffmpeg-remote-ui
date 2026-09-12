@@ -2,6 +2,7 @@ import type { HardwareInfo, Snapshot } from '../../api/types';
 import { Badge, DataList, EmptyState } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
 import { useI18n } from '../../i18n/LocaleProvider';
+import { platformOf } from '../workspace/args';
 import styles from './HardwareView.module.css';
 
 interface HardwareViewProps {
@@ -13,20 +14,23 @@ interface HardwareViewProps {
 export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
   const { t, formatDate } = useI18n();
   const devices = hardware?.devices ?? [];
+  // 设备字段与加速方法都随服务器平台变，所以这里也照服务器说的来，
+  // 而不是照浏览器所在的系统猜。
+  const platform = platformOf(hardware?.os);
 
   return (
     <Panes columns={2}>
-      <Pane title={t('hw.drm.title')} description={t('hw.drm.description')}>
+      <Pane title={t('hw.devices.title')} description={t('hw.devices.description')}>
         {hardware === null ? (
-          <EmptyState title={t('hw.drm.loading')} />
+          <EmptyState title={t('hw.devices.loading')} />
         ) : devices.length === 0 ? (
-          <EmptyState title={t('hw.drm.empty.title')} hint={t('hw.drm.empty.hint')} />
+          <EmptyState title={t('hw.devices.empty.title')} hint={t('hw.devices.empty.hint')} />
         ) : (
           <ul className={styles.devices}>
             {devices.map((device) => (
               <li className={styles.device} key={device.id}>
                 <header className={styles.deviceHead}>
-                  {/* 有型号就用型号当标题，认卡比看 PCI 地址直观得多。 */}
+                  {/* 有型号就用型号当标题，认卡比看 ID 直观得多。 */}
                   <span className={styles.deviceId}>
                     {device.deviceName || device.pciAddress || device.id}
                   </span>
@@ -38,20 +42,26 @@ export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
                   items={[
                     { label: t('hw.field.model'), value: device.deviceName || '—' },
                     { label: t('hw.field.vendor'), value: device.vendorName || '—' },
-                    { label: t('hw.field.renderNode'), value: device.renderNode ?? '—' },
-                    { label: t('hw.field.cardNode'), value: device.cardNode ?? '—' },
-                    { label: t('hw.field.pci'), value: device.pciAddress ?? '—' },
                     {
                       label: t('hw.field.ids'),
                       value: `${device.vendor ?? '—'} / ${device.deviceId ?? '—'}`,
                     },
-                    { label: t('hw.field.sysfs'), value: device.sysfsPath ?? '—' },
+                    // render node、card node、sysfs 与 PCI 地址都是 DRM 那一套的概念，
+                    // 没有它们的平台上这几项恒为空，列出来只是占地方。
+                    ...(platform === 'posix'
+                      ? [
+                          { label: t('hw.field.renderNode'), value: device.renderNode ?? '—' },
+                          { label: t('hw.field.cardNode'), value: device.cardNode ?? '—' },
+                          { label: t('hw.field.pci'), value: device.pciAddress ?? '—' },
+                          { label: t('hw.field.sysfs'), value: device.sysfsPath ?? '—' },
+                        ]
+                      : []),
                   ]}
                 />
 
                 {device.properties && Object.keys(device.properties).length > 0 ? (
                   <details className={styles.raw}>
-                    <summary className={styles.rawSummary}>{t('hw.raw.uevent')}</summary>
+                    <summary className={styles.rawSummary}>{t('hw.raw.fields')}</summary>
                     <pre className={styles.pre}>
                       {Object.entries(device.properties)
                         .map(([key, value]) => `${key}=${value}`)
