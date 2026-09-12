@@ -631,15 +631,23 @@ export function buildArgs({
     const sameInitialisation =
       inputHwType !== '' && inputHwType === outputHwType && inputHwDevice === outputHwDevice;
 
+    // 输出侧那块要**两条**指名一起写：它们各管一层，指向的是同一块卡。
+    //
+    //   - `-filter_hw_device <名>`：文档说它「把命名的设备交给滤镜图」，而输出流的
+    //     编码器正是从滤镜图继承 hw_device_ctx 的——这是「编码器用哪块卡」最直接的
+    //     一步。
+    //   - 该类型自己的 `<类型>_device <节点>`（ffmpeg 帮助里就是这么命名的，例如
+    //     `-qsv_device`）：多卡时官方给的就是它。
+    //
+    // 只写其中一条时，编码器在某些情况下仍会落回默认设备（两台机器上的现象都是这样），
+    // 所以两条都写——它们不冲突，指向同一块卡。
+    const name = sameInitialisation ? inputHwName : hwDeviceName(outputHwType, hwNames);
+    if (!sameInitialisation) {
+      args.push('-init_hw_device', hwDeviceArg(outputHwType, name, outputHwDevice));
+    }
+    args.push('-filter_hw_device', name);
     if (outputHwOption !== undefined && outputHwDevice !== '') {
-      // 这个类型有专门的设备选项，直接指名——多卡时 ffmpeg 官方给的就是它。
       args.push(`-${outputHwOption}`, outputHwDevice);
-    } else {
-      const name = sameInitialisation ? inputHwName : hwDeviceName(outputHwType, hwNames);
-      if (!sameInitialisation) {
-        args.push('-init_hw_device', hwDeviceArg(outputHwType, name, outputHwDevice));
-      }
-      args.push('-filter_hw_device', name);
     }
   }
 

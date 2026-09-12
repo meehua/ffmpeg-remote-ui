@@ -472,8 +472,9 @@ test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的
   //   输入侧 —— 创建命名设备。QSV 的 DRM 节点要用 child_device= 传（官方文档：
   //             `-init_hw_device qsv:hw,child_device=/dev/dri/renderD129`）；写进
   //             device 位置不会报错，却会被当成 MFX 实现选择符，设备退回默认那块。
-  //   输出侧 —— 用这个类型的专用设备选项 `-qsv_device`。文档里 `-filter_hw_device`
-  //             只管滤镜，拿它选「编码器用哪块卡」是不起作用的。
+  //   输出侧 —— 两条指名一起写：`-filter_hw_device`（编码器从滤镜图继承设备）与
+  //             该类型自己的 `-qsv_device`（多卡时官方给的那条）。只写一条时编码器
+  //             仍可能落回默认设备。
   const twoCards = {
     ...args.emptySettings,
     inputHardware: { type: 'qsv', device: '/dev/dri/renderD128' },
@@ -482,6 +483,10 @@ test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的
   assert.deepEqual(build(twoCards, '', cliHelpWithQsvDevice), [
     '-init_hw_device',
     'qsv=qsv:hw,child_device=/dev/dri/renderD128',
+    '-init_hw_device',
+    'qsv=qsv2:hw,child_device=/dev/dri/renderD129',
+    '-filter_hw_device',
+    'qsv2',
     '-qsv_device',
     '/dev/dri/renderD129',
     // 输入侧那块用于解码；两条都是 input-only 的选项，所以落在 -i 之前。
@@ -494,8 +499,7 @@ test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的
     'out.mp4',
   ]);
 
-  // 这套 ffmpeg 没报类型专用选项时：退回 init + filter_hw_device（它只管滤镜，
-  // 但至少把设备交出去了）。
+  // 这套 ffmpeg 没报类型专用选项时：只剩 `-filter_hw_device` 这一条。
   assert.deepEqual(build(twoCards).slice(0, 8), [
     '-init_hw_device',
     'qsv=qsv:hw,child_device=/dev/dri/renderD128',
@@ -519,13 +523,15 @@ test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的
     'out.mp4',
   ]);
 
-  // 只填了类型、没填节点：没有节点就没法用专用选项指名，退回命名设备。
+  // 只填了类型、没填节点：专用选项没值可给，只留 `-filter_hw_device`。
   const typeOnly = { ...args.emptySettings, outputHardware: { type: 'qsv', device: '' } };
-  assert.deepEqual(build(typeOnly, '', cliHelpWithQsvDevice).slice(0, 4), [
+  assert.deepEqual(build(typeOnly, '', cliHelpWithQsvDevice).slice(0, 6), [
     '-init_hw_device',
     'qsv=qsv',
     '-filter_hw_device',
     'qsv',
+    '-i',
+    'in.mp4',
   ]);
 
   // 两侧都留空：一条也不生成，其余照旧。
@@ -546,6 +552,10 @@ test('旧预设里那一个 hwDevice 迁到输出侧', () => {
   assert.equal(loaded.settings.inputHardware.type, '');
   assert.equal(loaded.settings.outputHardware.type, 'qsv');
   assert.deepEqual(build(loaded.settings, '', cliHelpWithQsvDevice), [
+    '-init_hw_device',
+    'qsv=qsv:hw,child_device=0',
+    '-filter_hw_device',
+    'qsv',
     '-qsv_device',
     '0',
     '-i',
