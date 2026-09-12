@@ -62,8 +62,18 @@ func TestLoadCreatesConfigOnFirstRun(t *testing.T) {
 func TestLoadReadsFileAndLetsEnvWin(t *testing.T) {
 	dir := isolate(t)
 	path := filepath.Join(dir, FileName)
-	body := `{"httpAddr": ":8090", "mediaRoots": ["/data/media"], "maxConcurrentJobs": 4}`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	// 媒体目录用平台本地的绝对路径：写死 /data/media 的话，它在 Windows 上
+	// 指的是当前盘的 \data\media，与规范化之后的期望值对不上。
+	mediaRoot := filepath.Join(t.TempDir(), "media")
+	body, err := json.Marshal(map[string]any{
+		"httpAddr":          ":8090",
+		"mediaRoots":        []string{mediaRoot},
+		"maxConcurrentJobs": 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,7 +81,7 @@ func TestLoadReadsFileAndLetsEnvWin(t *testing.T) {
 	if cfg.HTTPAddr != ":8090" || cfg.MaxConcurrentJobs != 4 {
 		t.Errorf("配置文件的值没有生效: %+v", cfg)
 	}
-	if len(cfg.MediaRoots) != 1 || cfg.MediaRoots[0] != "/data/media" {
+	if len(cfg.MediaRoots) != 1 || cfg.MediaRoots[0] != filepath.Clean(mediaRoot) {
 		t.Errorf("媒体目录 = %v", cfg.MediaRoots)
 	}
 	// 文件没写的字段仍应报告为「来自默认值」。
@@ -106,10 +116,14 @@ func TestLoadReadsFileAndLetsEnvWin(t *testing.T) {
 
 func TestEnvMediaRootsUsesPathListSeparator(t *testing.T) {
 	isolate(t)
-	t.Setenv(EnvMediaRoots, "/a"+string(os.PathListSeparator)+" /b ")
+	// 分隔符取自 os.PathListSeparator（Windows 上是分号），两边的目录也换成
+	// 平台本地路径，这样测的仍然是「按分隔符拆分」这件事本身。
+	a := filepath.Join(t.TempDir(), "a")
+	b := filepath.Join(t.TempDir(), "b")
+	t.Setenv(EnvMediaRoots, a+string(os.PathListSeparator)+" "+b+" ")
 
 	cfg, info := Load()
-	if len(cfg.MediaRoots) != 2 || cfg.MediaRoots[0] != "/a" || cfg.MediaRoots[1] != "/b" {
+	if len(cfg.MediaRoots) != 2 || cfg.MediaRoots[0] != filepath.Clean(a) || cfg.MediaRoots[1] != filepath.Clean(b) {
 		t.Errorf("媒体目录 = %v", cfg.MediaRoots)
 	}
 	if info.Sources[FieldMediaRoots] != SourceEnv {
