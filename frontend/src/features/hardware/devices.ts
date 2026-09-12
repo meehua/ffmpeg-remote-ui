@@ -93,8 +93,8 @@ export function deviceDetail(device: GpuDevice): string {
 }
 
 /**
- * 厂商:设备 ID——认卡的标识符。清单里带的是注册表的写法（`0x10de` / `0x2560`），
- * 这里按 PCI 的通行写法归一到 `10de:2560`：短一点，也是各处文档通用的那一种。
+ * 厂商:设备 ID——认卡的标识符。清单里带的是注册表的写法（`0x1234` / `0x5678`），
+ * 这里按 PCI 的通行写法归一到 `1234:5678`：短一点，也是各处文档通用的那一种。
  */
 function idsOf(device: GpuDevice): string {
   const part = (value: string | undefined) =>
@@ -153,14 +153,13 @@ export function probeCandidates(devices: GpuDevice[], current: string): string[]
  * 设备行只来自服务器自己那份检测清单（`/api/hardware`），而且只列检测本身给出名字的
  * 那些——那个名字就是能填进 `-init_hw_device` 的值（Linux 上的 `/dev/dri/renderD128`
  * 就是）。检测给不出值的设备不列：宁可不写，也不替用户猜一个数字填进去（Windows 上
- * 的显示适配器就是这种，注册表子键序号与 FFmpeg 的适配器序号实测对不上）。
+ * 的显示适配器就是这种，注册表子键序号与 FFmpeg 认的适配器序号对不上）。
  *
  * 实测（见 probeCandidates）只回答「这个值能不能用」，结论按值相等写回它自己那一行，
  * 此外不做任何跨设备的对照：FFmpeg 报不报「这个值落在了哪块卡上」按类型各不相同——
- * d3d11va 会打印 `Using device 10de:2560 (NVIDIA GeForce RTX 3060 Laptop GPU)`，
- * cuda 在 verbose、debug、trace 三级日志下都只说它加载了 cuDeviceGetName 这类符号，
- * qsv 报的又是它自己挑中的子设备——从输出里抠设备名只会抠出一层脆壳，所以这里不抠。
- * 测过的值若不属于任何一台有名字的设备，就不占一行。
+ * d3d11va 会说它用的是哪块设备，cuda 在 verbose、debug、trace 三级日志下都只说它加载
+ * 了 cuDeviceGetName 这类符号，qsv 报的又是它自己挑中的子设备——从输出里抠设备名只会
+ * 抠出一层脆壳，所以这里不抠。测过的值若不属于任何一台有名字的设备，就不占一行。
  */
 export function hwNodeChoices(
   devices: GpuDevice[],

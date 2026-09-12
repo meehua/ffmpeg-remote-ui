@@ -140,29 +140,26 @@ frontend            React frontend (no UI component library, no CSS framework)
   is a global option and loses its meaning after the input. What `<node>` means is
   decided by FFmpeg, per type, and the same value does not mean the same thing
   across types: `1` is the second NVIDIA card for `cuda`, the second DXGI adapter
-  for `d3d11va`, and the "software implementation" selector for `qsv` (measured on
-  the machine here: `qsv=hw:1` fails with `Error creating a MFX session: -9`,
-  nothing to do with which card — qsv takes its adapter from its own
-  `child_device` option). So the node is neither pre-filled nor inferred: the
-  drop-down lists one row per device the server found — the same names the
-  hardware page uses, the model first and the vendor:device ID after it — and only
-  devices the server itself named are listed, because that name *is* what goes
-  into `-init_hw_device` (a render node such as `/dev/dri/renderD128` on Linux).
-  Where the server has no name to give, nothing is offered: on Windows the display
-  adapters only have registry subkey numbers, which are *not* the adapter numbers
-  FFmpeg counts (measured here: registry subkey 3 is a virtual display adapter
-  while FFmpeg's number 2 is the integrated GPU), so no number is guessed for
-  them.
+  for `d3d11va`, and the "software implementation" selector for `qsv` (`qsv=hw:1`
+  fails with `Error creating a MFX session: -9`, nothing to do with which card —
+  qsv takes its adapter from its own `child_device` option). So the node is neither
+  pre-filled nor inferred: the drop-down lists one row per device the server found —
+  the same names the hardware page uses, the model first and the vendor:device ID
+  after it — and only devices the server itself named are listed, because that name
+  *is* what goes into `-init_hw_device` (a render node such as
+  `/dev/dri/renderD128` on Linux). Where the server has no name to give, nothing is
+  offered: on Windows the display adapters only have registry subkey numbers, which
+  are *not* the adapter numbers FFmpeg counts, so no number is guessed for them.
 
   "Test which combinations work" answers the other half — whether a value starts
   up. The server initialises the device for real once per candidate ("choose
-  automatically" plus a few small ordinals), and the verdict is written onto the
-  row carrying that value. It deliberately does not try to work out which card a
-  number landed on: FFmpeg reports that differently per type (`d3d11va` prints
-  `Using device 10de:2560 (NVIDIA GeForce RTX 3060 Laptop GPU)`, `cuda` says
-  nothing about it at any log level, and `qsv` reports the sub-device it picked
-  itself), so scraping it out of the log would only ever be a brittle guess. Which
-  value works is answered by FFmpeg alone, never by a table inside the program.
+  automatically" plus a few small ordinals), and the verdict is written onto the row
+  carrying that value. It deliberately does not try to work out which card a number
+  landed on: FFmpeg reports that differently per type (`d3d11va` names the device it
+  used, `cuda` says nothing about it at any log level, and `qsv` reports the
+  sub-device it picked itself), so scraping it out of the log would only ever be a
+  brittle guess. Which value works is answered by FFmpeg alone, never by a table
+  inside the program.
 - **A type is not a capability promise**: when no device was discovered at all, the
   panel says so and warns that types needing dedicated hardware — `qsv` among them
   — may not work; when devices were found, it still warns that the type has to

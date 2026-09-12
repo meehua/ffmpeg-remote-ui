@@ -67,9 +67,9 @@ func checkHWProbe(types []string, probe hwProbeRequest) error {
 // hardwareProbe 逐个实测「这个类型配这个设备值」能不能用。
 //
 // 判断依据不是程序里的任何推断，而是 FFmpeg 自己初始化设备的结果。同一个数字在
-// CUDA 设备序号、DXGI 适配器序号、MFX 实现选择符里各指各的（本机上 qsv 收下 `1`
-// 会当成「软件实现」而报 -9，与哪块卡无关），哪一组成立只有 FFmpeg 知道；每个候选
-// 的回答连同它自己的原文一起交回界面。
+// CUDA 设备序号、DXGI 适配器序号、MFX 实现选择符里各指各的（qsv 收下 `1` 会当成
+// 「软件实现」而报 -9，与哪块卡无关），哪一组成立只有 FFmpeg 知道；每个候选的回答
+// 交回界面。
 func (s *Server) hardwareProbe(w http.ResponseWriter, r *http.Request) {
 	var req hwProbeRequest
 	if err := decodeBody(w, r, &req); err != nil {
