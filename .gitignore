@@ -1,5 +1,6 @@
 # 构建产物
 /ffmpeg-remote-ui
+/ffmpeg-remote-ui.exe
 /frontend/dist/
 # go:embed 目录：由 build.sh 从 frontend/dist 复制而来
 cmd/*/web/

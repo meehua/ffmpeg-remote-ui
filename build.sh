@@ -5,6 +5,9 @@ set -euo pipefail
 # 构建额外需要 Node.js，用来生成前端产物（随后被 go:embed 进二进制）。
 #
 # 前端固定用 npm：Node.js 自带，既不必额外安装 pnpm，也不用在两者之间做探测。
+#
+# Windows 上也能直接跑这份脚本（Git Bash 里），产物是 ffmpeg-remote-ui.exe；
+# 不想装 Git Bash 的话用 build.ps1，那是同一套流程的 PowerShell 版本。
 
 if ! command -v go >/dev/null 2>&1; then
   echo '未找到 Go' >&2
@@ -54,9 +57,16 @@ else
 fi
 build_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
+# Windows 上产物带 .exe 后缀。Go 自己也会补，但在脚本里显式写出来才不含糊——
+# 下面两行还要用它。
+case "$(go env GOOS)" in
+  windows) bin='ffmpeg-remote-ui.exe' ;;
+  *)       bin='ffmpeg-remote-ui' ;;
+esac
+
 go build -trimpath \
   -ldflags="-s -w -X main.version=$build_version -X main.commit=$build_commit -X main.buildDate=$build_date" \
-  -o ffmpeg-remote-ui ./cmd/ffmpeg-remote-ui
+  -o "$bin" ./cmd/ffmpeg-remote-ui
 
-printf '\n构建完成：./ffmpeg-remote-ui（直接运行即可，终端会打印监听地址）\n'
-printf '版本：%s\n' "$(./ffmpeg-remote-ui --version)"
+printf '\n构建完成：./%s（直接运行即可，终端会打印监听地址）\n' "$bin"
+printf '版本：%s\n' "$("./$bin" --version)"

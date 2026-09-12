@@ -167,6 +167,15 @@ jobs:
             go build -trimpath -ldflags "$LDFLAGS" \
             -o dist/ffmpeg-remote-ui-linux-riscv64 ./cmd/ffmpeg-remote-ui
 
+          # Windows：产物带 .exe，文件名里也写明架构，下载页上一眼能分清楚
+          GOOS=windows GOARCH=amd64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-windows-amd64.exe ./cmd/ffmpeg-remote-ui
+
+          GOOS=windows GOARCH=arm64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o dist/ffmpeg-remote-ui-windows-arm64.exe ./cmd/ffmpeg-remote-ui
+
           cp LICENSE dist/LICENSE
 
       # 创建 Release
