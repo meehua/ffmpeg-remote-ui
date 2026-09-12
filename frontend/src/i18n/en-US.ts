@@ -168,6 +168,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'catalog.search': 'Search in "{label}"',
   'catalog.search.aria': 'Search capabilities',
   'catalog.count': '{shown} / {total} items',
+  'catalog.list.aria': '{label} list',
   'catalog.empty': 'No matching entries',
   'catalog.detail.title': 'Entry details',
   'catalog.detail.description': 'Expanded from ffmpeg -h; option types, defaults and ranges all come from FFmpeg.',

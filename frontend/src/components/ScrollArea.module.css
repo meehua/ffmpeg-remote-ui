@@ -1,0 +1,36 @@
+/*
+ * 滚动容器的两种形态，跟着 LayoutMode 走（由 JS 判定后加类名，不是媒体查询）：
+ *   折叠形态 —— 不限高、不滚动，就是文档流里的一个普通盒子；
+ *   并排形态 —— 接过滚动，并占满父级剩下的高度。
+ *
+ * 只有 .scrolls 会设 overflow。被包住的组件一律保持「自己不会滚」，这样同一屏里
+ * 出现的滚动条数量是可数的，滚轮也就不会在好几层之间乱窜。
+ */
+.area {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  /* 作为 flex/grid 子项，默认的 min-block-size: auto 会撑到内容高度并顶破父级，
+     显式归零后「限高 + 内部滚动」才谈得上。 */
+  min-block-size: 0;
+}
+
+.scrolls {
+  /*
+   * 默认占满父级剩下的高度——父级得是高度确定的 flex 容器，见 Pane.module.css
+   * 的 .body。传了 maxBlockSize 就改成限高：整栏的列表希望占满，嵌在正文中间的
+   * 小块只希望别太长，两种都用得上。
+   */
+  flex: 1 1 auto;
+  max-block-size: var(--scroll-max, none);
+  overflow-block: auto;
+  overscroll-behavior-block: contain;
+  /* 滚动条一出现就占宽，内容会跟着左右跳一下；预留出这条槽位，布局就不动。 */
+  scrollbar-gutter: stable;
+}
+
+/* 键盘把焦点移进来时给个内移的焦点环，免得贴边被裁掉一半。 */
+.scrolls:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}

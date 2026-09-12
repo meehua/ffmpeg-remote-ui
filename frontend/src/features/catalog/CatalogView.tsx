@@ -5,6 +5,7 @@ import type { FFOption, FFItem, Snapshot } from '../../api/types';
 import { Button, TextInput } from '../../components/Controls';
 import { Badge, DataList, EmptyState, ErrorNote, Spinner } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
+import { ScrollArea } from '../../components/ScrollArea';
 import { Tabs } from '../../components/Tabs';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
 import type { MessageKey } from '../../i18n';
@@ -73,6 +74,10 @@ interface CatalogViewProps {
  * 这里展示的每一项都是服务器 FFmpeg 自己报告的，点开还能看到 `-h` 的
  * 结构化结果与原始文本——「FFmpeg 是能力的唯一事实来源」在这个页面上
  * 是可验证的，而不是一句口号。
+ *
+ * 两侧内容都可能极长（一个编码器动辄上百个参数，某一类条目几千条），所以两栏
+ * 都把滚动交给 ScrollArea：切换条、搜索框与栏标题因此始终留在视线里，而不是被
+ * 内容推着走。
  */
 export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProps) {
   const { t } = useI18n();
@@ -118,19 +123,21 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
           </Button>
         }
       >
-        <Tabs
-          label={t('catalog.tabs')}
-          value={categoryKey}
-          onChange={(next) => {
-            setCategoryKey(next);
-            setSelected(null);
-          }}
-          items={CATEGORIES.map((item) => ({
-            id: item.key,
-            label: t(item.labelKey),
-            count: itemsOf(snapshot, item.key).length,
-          }))}
-        />
+        <div className={styles.tabBar}>
+          <Tabs
+            label={t('catalog.tabs')}
+            value={categoryKey}
+            onChange={(next) => {
+              setCategoryKey(next);
+              setSelected(null);
+            }}
+            items={CATEGORIES.map((item) => ({
+              id: item.key,
+              label: t(item.labelKey),
+              count: itemsOf(snapshot, item.key).length,
+            }))}
+          />
+        </div>
 
         <TextInput
           type="search"
@@ -144,36 +151,43 @@ export function CatalogView({ snapshot, onRefresh, refreshing }: CatalogViewProp
           {t('catalog.count', { shown: entries.length, total: all.length })}
         </p>
 
+        {/* 单独滚动这一份列表是有理由的：它是全站唯一长度完全由服务器决定的列表
+            （编码器动辄几千条），其余列表都在几十条以内，跟着栏一起滚反而更省事，
+            也少一个滚轮目标。 */}
         {entries.length === 0 ? (
           <EmptyState title={t('catalog.empty')} />
         ) : (
-          <ul className={styles.list}>
-            {entries.map((item) => {
-              const active = selected?.name === item.name && selected.target === category.target;
-              return (
-                <li key={item.name}>
-                  <button
-                    type="button"
-                    className={active ? `${styles.entry} ${styles.entryActive}` : styles.entry}
-                    disabled={!category.target}
-                    onClick={() =>
-                      category.target ? setSelected({ target: category.target, name: item.name }) : undefined
-                    }
-                  >
-                    <span className={styles.entryName}>{item.name}</span>
-                    {item.flags ? <span className={styles.flags}>{item.flags}</span> : null}
-                    <span className={styles.entryDesc}>{item.description ?? ''}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <ScrollArea label={t('catalog.list.aria', { label: t(category.labelKey) })}>
+            <ul className={styles.list}>
+              {entries.map((item) => {
+                const active = selected?.name === item.name && selected.target === category.target;
+                return (
+                  <li key={item.name}>
+                    <button
+                      type="button"
+                      className={active ? `${styles.entry} ${styles.entryActive}` : styles.entry}
+                      disabled={!category.target}
+                      onClick={() =>
+                        category.target ? setSelected({ target: category.target, name: item.name }) : undefined
+                      }
+                    >
+                      <span className={styles.entryName}>{item.name}</span>
+                      {item.flags ? <span className={styles.flags}>{item.flags}</span> : null}
+                      <span className={styles.entryDesc}>{item.description ?? ''}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </ScrollArea>
         )}
       </Pane>
 
       <Pane title={t('catalog.detail.title')} description={t('catalog.detail.description')}>
         {selected ? (
-          <HelpPanel target={selected.target} name={selected.name} />
+          <ScrollArea label={t('catalog.detail.title')}>
+            <HelpPanel target={selected.target} name={selected.name} />
+          </ScrollArea>
         ) : (
           <EmptyState
             title={t('catalog.detail.empty.title')}

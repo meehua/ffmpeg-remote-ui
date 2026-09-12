@@ -173,6 +173,7 @@ export const zhCN = {
   'catalog.search': '在「{label}」中搜索',
   'catalog.search.aria': '搜索能力',
   'catalog.count': '{shown} / {total} 项',
+  'catalog.list.aria': '{label}列表',
   'catalog.empty': '没有匹配的条目',
   'catalog.detail.title': '条目详情',
   'catalog.detail.description': '展开自 ffmpeg -h；参数的类型、默认值与取值范围都是 FFmpeg 给出的。',

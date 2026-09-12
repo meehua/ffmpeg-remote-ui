@@ -4,6 +4,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 分类条与条目列表各自作为查询容器：里面的切换条与条目据此决定换行还是降级。
+   判据是容器宽度而不是视口宽度——同一个视口分成窄栏之后，这两个组件就该换一种
+   排法（见 components/Tabs.module.css）。 */
+.tabBar {
+  container-type: inline-size;
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -11,6 +18,7 @@
   padding: 0;
   list-style: none;
   border-block-start: 1px solid var(--line);
+  container-type: inline-size;
 }
 
 .entry {
@@ -65,8 +73,8 @@
   white-space: nowrap;
 }
 
-/* 窄屏时把 flags 挤到下一行，名称优先。 */
-@media (max-width: 30rem) {
+/* 窄栏时把 flags 挤到下一行，名称优先。 */
+@container (max-width: 30rem) {
   .entry {
     grid-template-columns: minmax(0, 1fr);
   }
