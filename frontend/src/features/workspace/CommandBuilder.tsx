@@ -18,6 +18,7 @@ import type { MessageKey } from '../../i18n';
 import { useI18n } from '../../i18n/LocaleProvider';
 import { cx } from '../../utils/format';
 import {
+  hwNodeAuto,
   hwNodeChoices,
   hwNodeManual,
   probeCandidates,
@@ -103,17 +104,31 @@ const NODE_STATUS: Partial<Record<HwNodeKind, MessageKey>> = {
   untested: 'builder.hwNode.untested',
 };
 
-/** 一行候选的文字：`值 · 结论 · 说的是什么`；空的那一段不占位。 */
+/**
+ * 一行候选的文字：这一行说的是谁，然后是结论。
+ *
+ * 认卡靠型号，所以设备行的开头就是型号（标识符紧随其后，同型号的两块卡只能靠它
+ * 分）；「自动选择」与被手填过的值没有型号可写，就写它们自己（不指定、那个值）。
+ * 结论永远排最后：它是这一行的注脚，不是这一行在说谁。
+ */
 function hwNodeLabel(node: HwNodeChoice, t: (key: string) => string): string {
+  const parts: string[] = [];
   if (node.kind === 'manual') {
-    // 手填那一项没有值可写（它的值是哨兵），剩下的就是这句话。
-    return t('builder.hwNode.manual');
+    parts.push(t('builder.hwNode.manual'));
+  } else if (node.kind === 'untested') {
+    parts.push(node.value);
+  } else if (node.value === hwNodeAuto) {
+    // 认「不指定」认的是值不是 kind：实测之后它的 kind 已经是结论了。
+    parts.push(t('builder.hwNode.auto'));
+  } else {
+    parts.push(node.text);
   }
-  // 值为空表示「不指定」：这一项也要连结论一起写，否则实测之后单看一个「可用」，
-  // 根本看不出说的是哪一项。
-  const head = node.value === '' ? t('builder.hwNode.auto') : node.value;
+
   const key = NODE_STATUS[node.kind];
-  return [head, key ? t(key) : '', node.text].filter((part) => part !== '').join(' · ');
+  if (key) {
+    parts.push(t(key));
+  }
+  return parts.filter((part) => part !== '').join(' · ');
 }
 
 /**

@@ -52,8 +52,8 @@ export const hwNodeManual = '\u0000manual';
 /**
  * 一条选项是哪种来历。
  *
- * 界面靠它决定中间那半句写什么词，也让「这条有结论」与「这条只是清单里的名字」
- * 在视觉上分得开。
+ * 界面靠它决定这一行的结论写什么词（可用 / 不可用 / 未实测），也让「这台设备有结论」
+ * 与「它只是清单里的一个名字」在视觉上分得开。
  */
 export type HwNodeKind = 'auto' | 'ok' | 'fail' | 'listed' | 'untested' | 'manual';
 
@@ -62,9 +62,13 @@ export interface HwNodeChoice {
   /** 选中后写进设置的值；手填那一项是哨兵，界面另有处理。 */
   value: string;
   kind: HwNodeKind;
-  /** 值之外的那半句：FFmpeg 认出的设备、不可用的原因，或清单里的型号。 */
+  /**
+   * 这一行说的是哪台设备：型号在前、标识符在后。
+   *
+   * 只有设备行有；「自动选择」、手填的项与手填过的值都没有设备可写，留空。
+   */
   text: string;
-  /** 悬浮说明：实测项放完整原文，清单项放认卡用得上的标签。 */
+  /** 悬浮说明：有实测的放完整原文，只有名字的放认卡用得上的标签。 */
   detail: string;
 }
 
@@ -88,9 +92,19 @@ export function deviceDetail(device: GpuDevice): string {
   return [device.vendorName, device.pciAddress, device.driver].filter(Boolean).join(' · ');
 }
 
-/** 厂商:设备 ID——认卡用的那个标识符；缺一段就少一段。 */
+/**
+ * 厂商:设备 ID——认卡的标识符。清单里带的是注册表的写法（`0x10de` / `0x2560`），
+ * 这里按 PCI 的通行写法归一到 `10de:2560`：短一点，也是各处文档通用的那一种。
+ */
 function idsOf(device: GpuDevice): string {
-  return [device.vendor, device.deviceId].filter(Boolean).join(':');
+  const part = (value: string | undefined) =>
+    value ? value.trim().toLowerCase().replace(/^0x/, '') : '';
+  return [part(device.vendor), part(device.deviceId)].filter((item) => item !== '').join(':');
+}
+
+/** 设备的名字：型号在前（人认卡靠它），标识符跟在后（同型号的两块卡只能靠它分）。 */
+export function deviceLabel(device: GpuDevice): string {
+  return [deviceTitle(device), idsOf(device)].filter((part) => part !== '').join(' · ');
 }
 
 /**
@@ -107,15 +121,7 @@ function idsOf(device: GpuDevice): string {
 export function hwNodeOptions(devices: GpuDevice[]): HwNodeOption[] {
   return devices.flatMap((device) =>
     device.hwNode
-      ? [
-          {
-            value: device.hwNode,
-            // 型号在前、标识符在后：节点本身就是这一项的值，再写一遍只是噪声；
-            // 而同型号的两块卡只能靠标识符区分，所以它必须在。
-            text: [deviceTitle(device), idsOf(device)].filter((part) => part !== '').join(' · '),
-            detail: deviceDetail(device),
-          },
-        ]
+      ? [{ value: device.hwNode, text: deviceLabel(device), detail: deviceDetail(device) }]
       : [],
   );
 }
@@ -126,11 +132,11 @@ export function hwNodeOptions(devices: GpuDevice[]): HwNodeOption[] {
  * 除了清单里那些确定的名字，还穷举 0、1、2、3 几个小序数：Windows 上的 d3d11va、
  * cuda 就是靠序号选设备，而程序不可能知道机器上排到了几号。与其让用户去猜，不如
  * 让 FFmpeg 每个都答一遍——这是**穷举**，不是映射表：这里没有任何「哪块卡是几号」
- * 的说法，号码的含义完全由 FFmpeg 的回答给出（结果里连着它的原文一起展示）。
+ * 的说法，号码的含义完全由 FFmpeg 的回答给出。
  *
  * 正因如此，序号在 qsv 这类类型上试出来的结论要连同原文一起看：同一个 `1` 在 qsv
  * 眼里是 MFX 的「软件实现」，失败与哪块卡无关。程序不替用户下结论，也不隐藏这一层：
- * 它只负责把 FFmpeg 说过的话摆回去。
+ * 它只负责把 FFmpeg 的回答摆回去。
  */
 export function probeCandidates(devices: GpuDevice[], current: string): string[] {
   const values = ['', '0', '1', '2', '3', ...hwNodeOptions(devices).map((node) => node.value)];
@@ -142,107 +148,71 @@ export function probeCandidates(devices: GpuDevice[], current: string): string[]
 }
 
 /**
- * 设备节点下拉里的全部选项，按「能确定的程度」排：先是不指定，然后是实测过、有结论
- * 的值，再是清单里系统自己给出名字的值，最后是手填过的值与本项。
+ * 设备节点下拉里的全部选项：**一行一台设备**。
  *
- * 实测结论来自服务器真的初始化过一次（见 probeCandidates）：成功的那一行，FFmpeg
- * 会说自己落到了哪块设备上（`item.device`，例如 `10de:2560 (NVIDIA GeForce RTX
- * 3060 Laptop GPU)`）；失败就说原因（`item.note`）。两句都是 FFmpeg 的原话，选项里
- * 只摆其中一句，完整原文放 detail 供悬浮查看。
+ * 设备行只来自服务器自己那份检测清单（`/api/hardware`），而且只列检测本身给出名字的
+ * 那些——那个名字就是能填进 `-init_hw_device` 的值（Linux 上的 `/dev/dri/renderD128`
+ * 就是）。检测给不出值的设备不列：宁可不写，也不替用户猜一个数字填进去（Windows 上
+ * 的显示适配器就是这种，注册表子键序号与 FFmpeg 的适配器序号实测对不上）。
  *
- * 同一个值只出现一次：实测过的值已经在前面带了结论，清单里就不再重复列一遍，
- * 免得好坏两种说法并排摆着让人挑。
+ * 实测（见 probeCandidates）只回答「这个值能不能用」，结论按值相等写回它自己那一行，
+ * 此外不做任何跨设备的对照：FFmpeg 报不报「这个值落在了哪块卡上」按类型各不相同——
+ * d3d11va 会打印 `Using device 10de:2560 (NVIDIA GeForce RTX 3060 Laptop GPU)`，
+ * cuda 在 verbose、debug、trace 三级日志下都只说它加载了 cuDeviceGetName 这类符号，
+ * qsv 报的又是它自己挑中的子设备——从输出里抠设备名只会抠出一层脆壳，所以这里不抠。
+ * 测过的值若不属于任何一台有名字的设备，就不占一行。
  */
 export function hwNodeChoices(
   devices: GpuDevice[],
   probes: HWProbe[] | null,
   current: string,
 ): HwNodeChoice[] {
-  const seen = new Set<string>();
-  // 「不指定」是唯一一个不需要先知道机器上有什么的选项，所以它总在最前面。
-  let auto: HwNodeChoice = { value: hwNodeAuto, kind: 'auto', text: '', detail: '' };
-  const tried: HwNodeChoice[] = [];
+  const tried = probes ?? [];
+  const used = new Set<string>();
 
-  for (const item of probes ?? []) {
-    if (seen.has(item.node)) {
-      continue;
-    }
-    seen.add(item.node);
-    if (item.node === hwNodeAuto) {
-      // 「不指定」在列表里本来就有一行，结论写进它，不再另起一行。
-      auto = probeChoice(item);
-    } else {
-      tried.push(probeChoice(item));
-    }
+  // 「不指定」：空节点是一个正经选项，它自己的实测结论写在它这一行上。
+  const autoItem = tried.find((item) => item.node === hwNodeAuto);
+  if (autoItem) {
+    used.add(hwNodeAuto);
   }
+  const auto: HwNodeChoice = {
+    value: hwNodeAuto,
+    kind: autoItem ? (autoItem.ok ? 'ok' : 'fail') : 'auto',
+    text: '',
+    detail: autoItem?.error ?? '',
+  };
 
-  // 清单里那些系统自己给出名字的值。文字要与「硬件」页认的一致，所以直接取
-  // hwNodeOptions 的结果——两边各拼一遍，正是这个模块开头说要避免的事。
-  const listed: HwNodeChoice[] = [];
+  const rows: HwNodeChoice[] = [];
   for (const option of hwNodeOptions(devices)) {
-    if (seen.has(option.value)) {
+    if (used.has(option.value)) {
       continue;
     }
-    seen.add(option.value);
-    listed.push({
+    used.add(option.value);
+    // 这个值实测过就带上结论：按值相等对上，不需要认出它是哪块卡。
+    const item = tried.find((probe) => probe.node === option.value);
+    rows.push({
       value: option.value,
-      kind: 'listed',
+      kind: item ? (item.ok ? 'ok' : 'fail') : 'listed',
       text: option.text,
-      detail: option.detail,
+      detail: item?.error || option.detail,
     });
   }
 
   // 手填过、但这一轮没测到的值（也可能测过而换了类型，结果已经作废）：摆出来让人
   // 看见自己填的是什么，否则下拉会显示成别的候选。
-  const value = current.trim();
+  const typed = current.trim();
   const untested: HwNodeChoice[] =
-    value === '' || value === hwNodeManual || seen.has(value)
+    typed === '' || typed === hwNodeManual || used.has(typed)
       ? []
-      : [{ value, kind: 'untested', text: '', detail: '' }];
+      : [{ value: typed, kind: 'untested', text: '', detail: '' }];
 
   return [
     auto,
-    ...tried,
-    ...listed,
+    ...rows,
     ...untested,
     // 手填永远是最后一项：它是「上面都不合适」的出口，不该夹在候选中间。
     { value: hwNodeManual, kind: 'manual', text: '', detail: '' },
   ];
-}
-
-/** 把一次实测收成一行：结论进 kind，FFmpeg 认出的设备或它说的原因进 text。 */
-function probeChoice(item: HWProbe): HwNodeChoice {
-  return {
-    value: item.node,
-    kind: item.ok ? 'ok' : 'fail',
-    text: (item.ok ? item.device : item.note) ?? '',
-    detail: probeRawText(item),
-  };
-}
-
-/**
- * 把一次实测的两段原文合成一段，挂在选项的 title 上。
- *
- * FFmpeg 的日志行与它末尾那条报错链会有重叠（同一句错误两边都出现），所以按行
- * 去重，免得悬浮出来看着像说了两遍。
- */
-function probeRawText(item: HWProbe): string {
-  const seen = new Set<string>();
-  const lines: string[] = [];
-  for (const block of [item.output, item.error]) {
-    if (!block) {
-      continue;
-    }
-    for (const line of block.split('\n')) {
-      const text = line.trim();
-      if (text === '' || seen.has(text)) {
-        continue;
-      }
-      seen.add(text);
-      lines.push(text);
-    }
-  }
-  return lines.join('\n');
 }
 
 /**

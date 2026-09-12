@@ -275,22 +275,7 @@ export interface HWProbe {
   /** 被实测的设备值；空串表示不指定节点。 */
   node: string;
   ok: boolean;
-  /**
-   * FFmpeg 自己说的「这个值落在了哪块设备上」，界面靠它回答「0 是哪块卡」。
-   *
-   * 取自 FFmpeg 的 `Using device 8086:9a60 (Intel(R) UHD Graphics).` 那一行，
-   * 只搬 `Using device ` 之后那段。有些类型不打印这行（cuda 就是），那就为空。
-   */
-  device?: string;
-  /** 这次初始化最后落下的一句话，失败时它就是原因本身（"Error creating a MFX session: -9."）。 */
-  note?: string;
-  /**
-   * FFmpeg 就这次初始化说过的话（原样截取，成功也给），界面收在「原文」里。
-   *
-   * 它是 device / note 的来源，也是它们取不到时的退路。程序不翻译这些行。
-   */
-  output?: string;
-  /** 失败时 FFmpeg 自己的报错原文。 */
+  /** 失败时 FFmpeg 自己的报错原文；成功时为空。 */
   error?: string;
 }
 
