@@ -1,5 +1,5 @@
-// Package hardware 只依据 Linux 自身提供的信息发现计算设备，
-// 不根据厂商或型号推断任何 FFmpeg 能力。
+//go:build linux
+
 package hardware
 
 import (
@@ -10,24 +10,6 @@ import (
 	"sort"
 	"strings"
 )
-
-// Device 是一个 DRM render node。
-//
-// VendorName / DeviceName 来自系统的 PCI ID 数据库，纯属「给人看的标签」：
-// 多块 GPU 时用来认出哪块是哪块，不参与任何能力判断。
-type Device struct {
-	ID         string            `json:"id"`
-	RenderNode string            `json:"renderNode,omitempty"`
-	CardNode   string            `json:"cardNode,omitempty"`
-	SysfsPath  string            `json:"sysfsPath,omitempty"`
-	Driver     string            `json:"driver,omitempty"`
-	Vendor     string            `json:"vendor,omitempty"`
-	DeviceID   string            `json:"deviceId,omitempty"`
-	VendorName string            `json:"vendorName,omitempty"`
-	DeviceName string            `json:"deviceName,omitempty"`
-	PCIAddress string            `json:"pciAddress,omitempty"`
-	Properties map[string]string `json:"properties,omitempty"`
-}
 
 // DiscoverRenderNodes 只依赖 /dev/dri 与 sysfs。
 //

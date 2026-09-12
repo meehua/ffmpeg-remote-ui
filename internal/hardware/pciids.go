@@ -1,3 +1,5 @@
+//go:build linux
+
 // pci.ids 解析：把 sysfs 里的 vendor/device ID 翻译成人类可读的型号名。
 //
 // 只用于显示。项目对硬件能力的态度是「一切以 FFmpeg 的运行时报告为准」，
