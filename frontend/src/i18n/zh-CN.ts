@@ -94,6 +94,7 @@ export const zhCN = {
   'hw.devices.empty.hint': '这个账户可能没有读取设备的权限，或者机器上确实没有可用的显示设备。',
   'hw.field.model': '型号',
   'hw.field.vendor': '厂商',
+  'hw.field.hwNode': '设备节点',
   'hw.field.renderNode': 'render node',
   'hw.field.cardNode': 'card node',
   'hw.field.pci': 'PCI',
@@ -201,9 +202,18 @@ export const zhCN = {
   'builder.hwDevice.hint': '设备类型与节点都取自服务器；多 GPU 时显式指定可避免 FFmpeg 挑错设备。',
   'builder.hwDevice.none': '不初始化（交给 FFmpeg 默认）',
   'builder.hwDevice.empty': '这套 FFmpeg 没有报告任何硬件设备类型（`-init_hw_device list` 为空）。',
+  'builder.hwDevice.noDevices':
+    '没有在服务器上发现任何显示设备。需要专用硬件的类型（qsv、nvenc、amf 之类）可能无法使用；服务器上确实有显卡的话，多半是驱动或设备权限没通。',
+  'builder.hwDevice.typeMatch':
+    '类型要与实际硬件对得上：FFmpeg 报的是它支持哪些类型，不代表本机就能用——对不上时它会直接报初始化设备失败。',
   'builder.hwNode': '设备节点',
-  'builder.hwNode.hint': '留空表示让 FFmpeg 在选中的类型里自己挑。',
+  'builder.hwNode.hint': '留空表示让 FFmpeg 在选中的类型里自己挑；Windows 上这里是显示适配器序号。',
   'builder.hwNode.auto': '自动选择',
+  'builder.hwProbe.run': '实测可用组合',
+  'builder.hwProbe.running': '正在实测…',
+  'builder.hwProbe.hint': '由服务器实际初始化一次设备，结果来自 FFmpeg 本身，不是程序推断。',
+  'builder.hwProbe.ok': '可用',
+  'builder.hwProbe.failed': '不可用',
   'builder.stream.encoder': '{media}编码器',
   'builder.stream.encoder.hint': 'copy 表示这一路直接复制、不重新编码；留空则由输出格式自己挑编码器。',
   'builder.stream.codec.unset': '不设置（由输出格式选默认编码器）',
@@ -355,6 +365,10 @@ export const zhCN = {
   'error.job.still_queued': '任务仍在队列中，请先取消',
   'error.job.internal': '任务执行器内部错误：{cause}',
   'error.job.cancelled': '已取消',
+
+  'error.hw.type_unknown': '未知的硬件设备类型：{type}',
+  'error.hw.node_unknown': '这台服务器没有报告过设备节点 {node}',
+  'error.hw.too_many_probes': '一次最多实测 {max} 个设备',
 
   'error.body.invalid_json': '请求体不是合法 JSON：{cause}',
 

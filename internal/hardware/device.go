@@ -15,10 +15,16 @@ package hardware
 // RenderNode / CardNode / SysfsPath 是 Linux 的概念（DRM render node 与 sysfs
 // 路径），在没有这套东西的平台上留空。
 type Device struct {
-	ID         string            `json:"id"`
-	RenderNode string            `json:"renderNode,omitempty"`
-	CardNode   string            `json:"cardNode,omitempty"`
-	SysfsPath  string            `json:"sysfsPath,omitempty"`
+	ID         string `json:"id"`
+	RenderNode string `json:"renderNode,omitempty"`
+	CardNode   string `json:"cardNode,omitempty"`
+	SysfsPath  string `json:"sysfsPath,omitempty"`
+	// HwNode 是这个设备在 `-init_hw_device <type>=hw:<node>` 里该填的那一段：
+	// Linux 上是 DRM 节点路径，Windows 上是显示适配器的序号。
+	//
+	// 它两边都非空，与上面三个只在 Linux 有意义的字段分开，是为了让界面只按
+	// 一个字段列候选——平台差异在各自的发现实现里消化掉，不扩散到界面。
+	HwNode     string            `json:"hwNode,omitempty"`
 	Driver     string            `json:"driver,omitempty"`
 	Vendor     string            `json:"vendor,omitempty"`
 	DeviceID   string            `json:"deviceId,omitempty"`

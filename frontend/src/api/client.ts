@@ -8,6 +8,7 @@ import type {
   HardwareInfo,
   Health,
   HelpResponse,
+  HWProbeResponse,
   Job,
   LogLine,
   MediaInfo,
@@ -153,6 +154,15 @@ export const api = {
   files: (path?: string) => request<FilesResponse>(`/api/files${query({ path })}`),
 
   hardware: () => request<HardwareInfo>('/api/hardware'),
+
+  /**
+   * 实测「类型 + 设备值」能不能在本机初始化起来。
+   *
+   * 由服务器实际跑一次 ffmpeg，所以结果是「能不能用」而不是推断；候选必须已经在
+   * `/api/hardware` 与快照里报告过，服务器会拒绝其余写法。
+   */
+  hardwareProbe: (type: string, nodes: string[]) =>
+    request<HWProbeResponse>('/api/hardware/probe', jsonPost({ type, nodes })),
 
   /** 把 argv 或手写文本变成最终命令；两种输入都由服务器解释。 */
   command: (input: { args: string[] } | { text: string }) =>

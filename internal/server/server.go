@@ -104,6 +104,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/files/scan", s.scanFiles)
 	mux.HandleFunc("POST /api/dirs", s.makeDirs)
 	mux.HandleFunc("GET /api/hardware", s.hardware)
+	mux.HandleFunc("POST /api/hardware/probe", s.hardwareProbe)
 	mux.HandleFunc("POST /api/command", s.command)
 
 	mux.HandleFunc("GET /api/config", s.configInfo)

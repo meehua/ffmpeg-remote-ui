@@ -56,6 +56,11 @@ const (
 	CodeJobInternal           Code = "job.internal"
 	CodeJobCancelled          Code = "job.cancelled"
 
+	// ---- 硬件设备实测 ----
+	CodeHWTypeUnknown   Code = "hw.type_unknown"    // 设备类型不在 FFmpeg 报告的列表里
+	CodeHWNodeUnknown   Code = "hw.node_unknown"    // 设备节点不在服务器报告的列表里
+	CodeHWTooManyProbes Code = "hw.too_many_probes" // 一次实测的候选过多
+
 	// ---- 请求体 ----
 	CodeBodyInvalidJSON Code = "body.invalid_json"
 

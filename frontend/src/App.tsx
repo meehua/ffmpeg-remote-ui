@@ -8,7 +8,6 @@ import { BatchView } from './features/batch/BatchView';
 import { CatalogView } from './features/catalog/CatalogView';
 import { HardwareView } from './features/hardware/HardwareView';
 import { WorkspaceView } from './features/workspace/WorkspaceView';
-import { platformOf } from './features/workspace/args';
 import { useAsync } from './hooks/useAsync';
 import { useJobStream } from './hooks/useJobStream';
 import type { MessageKey } from './i18n';
@@ -130,8 +129,7 @@ export function App() {
               <BatchView
                 snapshot={snapshot.data}
                 cliHelp={cliHelp.data}
-                devices={hardware.data?.devices ?? []}
-                platform={platformOf(hardware.data?.os)}
+                hardware={hardware.data}
                 jobs={jobs}
                 logs={logs}
               />

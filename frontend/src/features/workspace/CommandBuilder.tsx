@@ -7,15 +7,17 @@ import type {
   CliSection,
   FFOption,
   GpuDevice,
+  HWProbe,
   Snapshot,
 } from '../../api/types';
-import { Field, Select, Switch, TextInput } from '../../components/Controls';
+import { Button, Field, Select, Switch, TextInput } from '../../components/Controls';
 import { ErrorNote, Spinner } from '../../components/Display';
 import { ScrollArea } from '../../components/ScrollArea';
-import { useAsync, useDebounced } from '../../hooks/useAsync';
+import { useAction, useAsync, useDebounced } from '../../hooks/useAsync';
 import type { MessageKey } from '../../i18n';
 import { useI18n } from '../../i18n/LocaleProvider';
 import { cx } from '../../utils/format';
+import { hwNodeOptions } from '../hardware/devices';
 import {
   defaultPosition,
   type CliPosition,
@@ -105,11 +107,33 @@ export function CommandBuilder({
   onChange,
 }: CommandBuilderProps) {
   const { t } = useI18n();
-  const renderNodes = useMemo(() => devices.filter((item) => item.renderNode), [devices]);
+  // 设备节点候选来自共享的设备逻辑模块：Linux 上是 DRM 节点路径，Windows 上是
+  // 适配器序号，怎么取由服务器端的发现实现决定，界面不分叉。
+  const nodes = useMemo(() => hwNodeOptions(devices), [devices]);
   const streamKinds = useMemo(() => streamKindsOf(cliHelp), [cliHelp]);
 
   const setHwDevice = (patch: Partial<EncodeSettings['hwDevice']>) =>
     onChange({ ...settings, hwDevice: { ...settings.hwDevice, ...patch } });
+
+  // 实测结果：null 表示还没测过，与「测了但一个都没成」区分开。
+  const [probes, setProbes] = useState<HWProbe[] | null>(null);
+  const probe = useAction();
+
+  /**
+   * 让服务器把当前类型配每一个候选都试一遍。
+   *
+   * 空串排在最前：不指定节点是第一个该试的组合。设备值的含义随类型而变
+   * （cuda 认 CUDA 设备序号、vaapi 认 DRM 节点、Windows 上的 qsv 认显示适配器
+   * 序号），程序不猜——哪一组成立只有 FFmpeg 自己知道。
+   */
+  const runProbe = () => {
+    const type = settings.hwDevice.type;
+    const candidates = ['', ...nodes.map((node) => node.value)];
+    void probe.run(async () => {
+      const result = await api.hardwareProbe(type, candidates);
+      setProbes(result.results);
+    });
+  };
 
   return (
     <div className={styles.builder}>
@@ -131,31 +155,59 @@ export function CommandBuilder({
         <p className={styles.sectionMeta}>{t('builder.hwDevice.empty')}</p>
       ) : null}
 
+      {/* 两条互斥的提醒，说的是同一件事的两面：ffmpeg 报的是「这套 FFmpeg 支持
+          哪些类型」，与机器上究竟有哪块卡是两回事。一台设备都没发现时要先讲清
+          「可能用不了」，发现了设备也要讲清「类型对不上照样用不了」。 */}
+      {devices.length === 0 ? (
+        <p className={styles.sectionMeta}>{t('builder.hwDevice.noDevices')}</p>
+      ) : (
+        <p className={styles.sectionMeta}>{t('builder.hwDevice.typeMatch')}</p>
+      )}
+
       {settings.hwDevice.type !== '' ? (
-        <Field label={t('builder.hwNode')} hint={t('builder.hwNode.hint')}>
-          <Select
-            value={settings.hwDevice.device}
-            onChange={(event) => setHwDevice({ device: event.target.value })}
-          >
-            <option value="">{t('builder.hwNode.auto')}</option>
-            {renderNodes.map((device) => (
-              <option
-                key={device.id}
-                value={device.renderNode}
-                title={[device.deviceName, device.pciAddress, device.driver].filter(Boolean).join(' · ')}
-              >
-                {/* 有型号就优先显示型号（认卡直观），没有则回退到 vendor:device ID；
-                    节点始终跟在后面，因为同型号的两块卡得靠它区分。 */}
-                {[
-                  device.deviceName || `${device.vendor ?? ''}:${device.deviceId ?? ''}`,
-                  device.renderNode,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <>
+          <Field label={t('builder.hwNode')} hint={t('builder.hwNode.hint')}>
+            <Select
+              value={settings.hwDevice.device}
+              onChange={(event) => setHwDevice({ device: event.target.value })}
+            >
+              <option value="">{t('builder.hwNode.auto')}</option>
+              {nodes.map((node) => (
+                <option key={node.value} value={node.value} title={node.detail}>
+                  {node.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          {/* 「哪个设备值能用」不靠猜：让服务器真的初始化一次，由 FFmpeg 回答。 */}
+          <div className={styles.probe}>
+            <Button compact onClick={runProbe} disabled={probe.pending}>
+              {probe.pending ? t('builder.hwProbe.running') : t('builder.hwProbe.run')}
+            </Button>
+            <span className={styles.sectionMeta}>{t('builder.hwProbe.hint')}</span>
+          </div>
+
+          {probe.error ? <ErrorNote>{probe.error.message}</ErrorNote> : null}
+
+          {probes ? (
+            <ul className={styles.probes}>
+              {probes.map((item) => (
+                <li
+                  key={item.node || 'auto'}
+                  className={cx(styles.probeItem, item.ok && styles.probeOk)}
+                >
+                  <span className={styles.probeNode}>
+                    {item.node === '' ? t('builder.hwNode.auto') : item.node}
+                  </span>
+                  <span>{item.ok ? t('builder.hwProbe.ok') : t('builder.hwProbe.failed')}</span>
+                  {/* 失败时把 FFmpeg 的原话摆出来，不替它总结。 */}
+                  {item.error ? <pre className={styles.probeError}>{item.error}</pre> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
       ) : null}
 
       {streamKinds.map((kind) => (

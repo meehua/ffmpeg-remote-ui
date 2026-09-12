@@ -26,6 +26,9 @@ func DiscoverRenderNodes() []Device {
 			RenderNode: node,
 			CardNode:   cards[sysfs],
 			SysfsPath:  sysfs,
+			// 喂给 FFmpeg 的那一段就是 render node 本身：它不依赖显示会话，
+			// 是 Linux 上 vaapi / qsv 这类类型真正要的节点。
+			HwNode:     node,
 			Properties: map[string]string{},
 		}
 		d.Driver = readDriver(sysfs)

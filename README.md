@@ -136,13 +136,21 @@ frontend            React frontend (no UI component library, no CSS framework)
   stay the job of the naming settings, not of the structure.
 - **Hardware devices can be chosen explicitly**: the device type comes from
   `ffmpeg -init_hw_device list` and the device node from the system's own device
-  list (`/dev/dri` on Linux, the display adapters Windows registers). On machines
-  with more than one GPU (integrated plus discrete, say) FFmpeg picks one on its
-  own, and picking wrong shows up as "failed to open encoder". Selecting one emits
-  `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device initialization
-  is a global option and loses its meaning after the input. On Windows you normally
-  don't need a node at all: the device type (`d3d11va`, `qsv`, `cuda`, …) is enough
-  for FFmpeg to pick.
+  list (`renderD*` under `/dev/dri` on Linux, the display adapters Windows
+  registers). A node is listed on both platforms: on Linux it is a path such as
+  `/dev/dri/renderD128`, on Windows the display adapter index (`0`, `1`, …). On
+  machines with more than one GPU (integrated plus discrete, say) FFmpeg picks one
+  on its own, and picking wrong shows up as "failed to open encoder". Selecting one
+  emits `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device
+  initialization is a global option and loses its meaning after the input. On
+  Windows you normally don't need a node at all: the device type (`d3d11va`, `qsv`,
+  `cuda`, …) is enough for FFmpeg to pick.
+- **A type is not a capability promise**: when no device was discovered at all, the
+  panel says so and warns that types needing dedicated hardware — `qsv` among them
+  — may not work; when devices were found, it still warns that the type has to
+  match the hardware: pick a wrong one and FFmpeg fails right at device
+  initialization. `-init_hw_device list` answers "which types this FFmpeg
+  supports", not "which of them this machine's card can use".
 
 ## Build
 

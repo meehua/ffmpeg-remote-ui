@@ -90,6 +90,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'hw.devices.empty.hint': 'This account may not have permission to read the devices, or the machine simply has none.',
   'hw.field.model': 'model',
   'hw.field.vendor': 'vendor',
+  'hw.field.hwNode': 'device node',
   'hw.field.renderNode': 'render node',
   'hw.field.cardNode': 'card node',
   'hw.field.pci': 'PCI',
@@ -196,9 +197,18 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'builder.hwDevice.hint': 'The device type and the node both come from the server; naming them explicitly stops FFmpeg from picking the wrong device when there are several GPUs.',
   'builder.hwDevice.none': 'Do not initialise (leave it to FFmpeg)',
   'builder.hwDevice.empty': 'This FFmpeg reports no hardware device types (`-init_hw_device list` is empty).',
+  'builder.hwDevice.noDevices':
+    'No display device was found on the server. Types that need dedicated hardware (qsv, nvenc, amf and the like) may not work; if the server does have a GPU, the driver or the device permissions are the likely cause.',
+  'builder.hwDevice.typeMatch':
+    'The type has to match the hardware: what FFmpeg reports is which types it supports, not which of them this machine can use — a mismatch fails right at device initialisation.',
   'builder.hwNode': 'Device node',
-  'builder.hwNode.hint': 'Leave empty to let FFmpeg pick within the selected type.',
+  'builder.hwNode.hint': 'Leave empty to let FFmpeg pick within the selected type; on Windows this is the display adapter index.',
   'builder.hwNode.auto': 'Choose automatically',
+  'builder.hwProbe.run': 'Test which combinations work',
+  'builder.hwProbe.running': 'Testing…',
+  'builder.hwProbe.hint': 'The server actually initialises the device once, so the answer comes from FFmpeg rather than from a guess.',
+  'builder.hwProbe.ok': 'works',
+  'builder.hwProbe.failed': 'fails',
   'builder.stream.encoder': '{media} encoder',
   'builder.stream.encoder.hint': 'copy means this stream is passed through instead of re-encoded; leaving it unset lets the output format pick an encoder.',
   'builder.stream.codec.unset': 'Unset (the output format picks the default encoder)',
@@ -351,6 +361,10 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'error.job.still_queued': 'The job is still queued; cancel it first',
   'error.job.internal': 'Internal error in the job runner: {cause}',
   'error.job.cancelled': 'Cancelled',
+
+  'error.hw.type_unknown': 'Unknown hardware device type: {type}',
+  'error.hw.node_unknown': 'This server has not reported a device node {node}',
+  'error.hw.too_many_probes': 'At most {max} devices can be tested at once',
 
   'error.body.invalid_json': 'The request body is not valid JSON: {cause}',
 

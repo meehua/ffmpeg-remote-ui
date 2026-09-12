@@ -238,6 +238,12 @@ export interface GpuDevice {
   renderNode?: string;
   cardNode?: string;
   sysfsPath?: string;
+  /**
+   * 这个设备在 `-init_hw_device <type>=hw:<node>` 里该填的那一段：
+   * Linux 上是 DRM 节点路径，Windows 上是显示适配器序号。两边的平台差异在
+   * 服务器端消化，界面只按这一个字段列候选。
+   */
+  hwNode?: string;
   driver?: string;
   vendor?: string;
   deviceId?: string;
@@ -253,6 +259,26 @@ export interface HardwareInfo {
   os: string;
   arch: string;
   devices: GpuDevice[];
+}
+
+/**
+ * 一次「这个类型配这个设备值能不能用」的实测结果。
+ *
+ * 判断依据是服务器真的初始化了一次设备，所以它回答的正是「本机能不能用」——
+ * 这是程序无从推断、只有 FFmpeg 自己知道的事。
+ */
+export interface HWProbe {
+  type: string;
+  /** 被实测的设备值；空串表示不指定节点。 */
+  node: string;
+  ok: boolean;
+  /** 失败时 FFmpeg 自己的报错原文。 */
+  error?: string;
+}
+
+export interface HWProbeResponse {
+  type: string;
+  results: HWProbe[];
 }
 
 export interface Health {

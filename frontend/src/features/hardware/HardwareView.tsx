@@ -3,6 +3,7 @@ import { Badge, DataList, EmptyState } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
 import { useI18n } from '../../i18n/LocaleProvider';
 import { platformOf } from '../workspace/args';
+import { deviceRows, deviceTitle } from './devices';
 import styles from './HardwareView.module.css';
 
 interface HardwareViewProps {
@@ -30,33 +31,18 @@ export function HardwareView({ snapshot, hardware }: HardwareViewProps) {
             {devices.map((device) => (
               <li className={styles.device} key={device.id}>
                 <header className={styles.deviceHead}>
-                  {/* 有型号就用型号当标题，认卡比看 ID 直观得多。 */}
-                  <span className={styles.deviceId}>
-                    {device.deviceName || device.pciAddress || device.id}
-                  </span>
+                  {/* 标题与字段都来自 features/hardware/devices：设备长什么样只在
+                      那一处说了算，「编码参数」面板的设备节点下拉也照它来。 */}
+                  <span className={styles.deviceId}>{deviceTitle(device)}</span>
                   {device.driver ? <Badge tone="accent">{device.driver}</Badge> : null}
                 </header>
 
                 <DataList
                   dense
-                  items={[
-                    { label: t('hw.field.model'), value: device.deviceName || '—' },
-                    { label: t('hw.field.vendor'), value: device.vendorName || '—' },
-                    {
-                      label: t('hw.field.ids'),
-                      value: `${device.vendor ?? '—'} / ${device.deviceId ?? '—'}`,
-                    },
-                    // render node、card node、sysfs 与 PCI 地址都是 DRM 那一套的概念，
-                    // 没有它们的平台上这几项恒为空，列出来只是占地方。
-                    ...(platform === 'posix'
-                      ? [
-                          { label: t('hw.field.renderNode'), value: device.renderNode ?? '—' },
-                          { label: t('hw.field.cardNode'), value: device.cardNode ?? '—' },
-                          { label: t('hw.field.pci'), value: device.pciAddress ?? '—' },
-                          { label: t('hw.field.sysfs'), value: device.sysfsPath ?? '—' },
-                        ]
-                      : []),
-                  ]}
+                  items={deviceRows(device, platform).map((row) => ({
+                    label: t(row.labelKey),
+                    value: row.value,
+                  }))}
                 />
 
                 {device.properties && Object.keys(device.properties).length > 0 ? (

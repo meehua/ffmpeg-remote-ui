@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { api } from '../../api/client';
-import type { CliHelp, GpuDevice, Job, LogLine, Snapshot } from '../../api/types';
+import type { CliHelp, HardwareInfo, Job, LogLine, Snapshot } from '../../api/types';
 import { Button, ButtonRow, Field, Switch, TextArea, TextInput } from '../../components/Controls';
 import { EmptyState, ErrorNote } from '../../components/Display';
 import { Pane, Panes } from '../../components/Pane';
@@ -19,9 +19,9 @@ import {
   hasOverwrite,
   joinArgs,
   normalizeSettings,
+  platformOf,
   withOverwrite,
   type EncodeSettings,
-  type Platform,
 } from '../workspace/args';
 import { outputPathFor } from '../workspace/naming';
 import { ExtensionPicker } from './ExtensionPicker';
@@ -31,10 +31,8 @@ interface BatchViewProps {
   snapshot: Snapshot | null;
   /** ffmpeg 自己的命令行拓扑；控件的结构跟着它走。 */
   cliHelp: CliHelp | null;
-  /** 服务器上真实存在的设备，供「硬件设备」选择使用。 */
-  devices: GpuDevice[];
-  /** 服务器所在平台：手写参数与命令预览按它的规则处理。 */
-  platform: Platform;
+  /** 服务器报告的平台与设备：设备候选与命令预览的拼接规则都从这里派生。 */
+  hardware: HardwareInfo | null;
   jobs: Job[];
   logs: Record<string, LogLine[]>;
 }
@@ -54,8 +52,12 @@ function uniqueDirs(outputs: string[]): string[] {
 }
 
 /** 批处理：一组输入文件套用同一套参数。 */
-export function BatchView({ snapshot, cliHelp, devices, platform, jobs, logs }: BatchViewProps) {
+export function BatchView({ snapshot, cliHelp, hardware, jobs, logs }: BatchViewProps) {
   const { t } = useI18n();
+  // 设备与平台都从整包 hardware 派生：界面上「设备」只有一处来源，视图之间
+  // 不再各自拆一遍（见 features/hardware/devices）。
+  const devices = hardware?.devices ?? [];
+  const platform = platformOf(hardware?.os);
   // 与工作区同理：状态放进浏览器本地存档，来回切换与刷新都不会白填。
   const [inputs, setInputs] = usePersistentState('batch.inputs', '');
   const [outDir, setOutDir] = usePersistentState('batch.outDir', '');
