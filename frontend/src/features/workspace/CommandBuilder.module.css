@@ -17,6 +17,7 @@
   background: var(--surface);
 }
 
+/* 既当普通标题行，也当折叠区的 <summary>：两者都是「左标题右摘要」的一行。 */
 .sectionHead {
   display: flex;
   flex-wrap: wrap;
@@ -25,8 +26,16 @@
   gap: var(--gap-xs);
 }
 
+/* 只有真正的折叠标题才可点，免得普通标题行给出「能点」的错觉。
+   默认的三角标记留着——它正是「这里可以点开」的唯一提示。 */
+summary.sectionHead {
+  cursor: pointer;
+}
+
 .sectionTitle {
   font-size: var(--text-sm);
+  /* 标题从 h3 换成 span 之后（见 CommandBuilder.tsx），字重不再来自 UA 样式。 */
+  font-weight: 600;
 }
 
 .sectionMeta {

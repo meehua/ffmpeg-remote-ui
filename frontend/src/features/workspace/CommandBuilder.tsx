@@ -11,6 +11,7 @@ import type {
 } from '../../api/types';
 import { Field, Select, Switch, TextInput } from '../../components/Controls';
 import { ErrorNote, Spinner } from '../../components/Display';
+import { ScrollArea } from '../../components/ScrollArea';
 import { useAsync, useDebounced } from '../../hooks/useAsync';
 import type { MessageKey } from '../../i18n';
 import { useI18n } from '../../i18n/LocaleProvider';
@@ -282,16 +283,20 @@ function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
   }
 
   return (
-    <section className={styles.section}>
-      <header className={styles.sectionHead}>
-        <h3 className={styles.sectionTitle}>{t('builder.cli.title')}</h3>
+    // 整块默认收起：`ffmpeg -h long` 光分节就有近二十个，全摊开没必要的长。
+    // 各分节自己也是折叠块，点开这里之后仍是一屏看得完的标题列表。
+    // 「几项已启用」留在标题行上，收起时也不丢信息。
+    <details className={styles.section}>
+      <summary className={styles.sectionHead}>
+        {/* summary 只收短语内容，标题因此用 span 而不是 h3，字重在样式里补回来。 */}
+        <span className={styles.sectionTitle}>{t('builder.cli.title')}</span>
         <span className={styles.sectionMeta}>
           {t('builder.cli.summary', {
             level: cliHelp.level || t('builder.cli.defaultLevel'),
             count: enabled,
           })}
         </span>
-      </header>
+      </summary>
 
       <TextInput
         type="search"
@@ -327,7 +332,7 @@ function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
           </ul>
         </details>
       ))}
-    </section>
+    </details>
   );
 }
 
@@ -537,17 +542,23 @@ function OptionSection({ label, target, name, values, onChange }: OptionSectionP
         <p className={styles.sectionMeta}>{t('builder.options.noMatch')}</p>
       ) : null}
 
-      <ul className={styles.options}>
-        {filtered.map((option) => (
-          <li key={option.name}>
-            <OptionRow
-              option={option}
-              value={values[option.name] ?? ''}
-              onChange={(value) => setValue(option.name, value)}
-            />
-          </li>
-        ))}
-      </ul>
+      {/* 参数是平铺的，一个编码器动辄上百项——限高之后交给它自己滚：宽屏时不再
+          把这一栏撑到几千像素；窄屏不受影响，照旧跟着文档流走。
+          上限取 min(50vh, 24rem)：屏幕矮时按视口走，屏幕高时不超过 24rem，
+          免得一个参数列表就把这一栏里后面的大块挤出视线。 */}
+      <ScrollArea label={label} maxBlockSize="min(50vh, 24rem)">
+        <ul className={styles.options}>
+          {filtered.map((option) => (
+            <li key={option.name}>
+              <OptionRow
+                option={option}
+                value={values[option.name] ?? ''}
+                onChange={(value) => setValue(option.name, value)}
+              />
+            </li>
+          ))}
+        </ul>
+      </ScrollArea>
     </section>
   );
 }
