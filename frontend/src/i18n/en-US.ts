@@ -23,7 +23,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'app.nav.hardware': 'Hardware',
   'app.nav.hardware.hint': 'Display devices and acceleration methods',
   'app.status.connected': 'Connected',
-  'app.status.disconnected': 'Event stream closed',
+  'app.status.disconnected': 'Live connection lost',
   'app.status.active': '{count} in progress',
   'app.status.devices': { one: '{count} display device', other: '{count} display devices' },
   'app.boundary.scope.app': 'The interface',
@@ -67,7 +67,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'common.empty': '(empty)',
   'common.unknown': 'unknown',
   'common.any': 'any',
-  'common.runtime': 'runtime',
+  'common.runtime': 'changeable at runtime',
   'common.overwrite': 'Overwrite existing output files (-y)',
   'common.listSeparator': ', ',
   'common.sentenceSeparator': ' ',
@@ -80,7 +80,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'file.filter': 'Filter by name',
   'file.reading': 'Reading directory',
   'file.empty.title': 'Nothing to show in this directory',
-  'file.empty.hint': 'Everything except hidden files and subdirectories is listed.',
+  'file.empty.hint': 'Hidden entries are skipped; everything else, files and subdirectories alike, is listed.',
 
   /* ------------------------------------------------------------ Hardware */
   'hw.devices.title': 'Display devices',
@@ -173,7 +173,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'catalog.detail.title': 'Entry details',
   'catalog.detail.description': 'Expanded from ffmpeg -h; option types, defaults and ranges all come from FFmpeg.',
   'catalog.detail.empty.title': 'No entry selected',
-  'catalog.detail.empty.hint': 'Click an encoder, filter or container format on the left to list all of its options here.',
+  'catalog.detail.empty.hint': 'Click an encoder, filter or muxer on the left to list all of its options here.',
   'catalog.help.loading': 'Reading ffmpeg -h',
   'catalog.help.empty': 'Nothing returned',
   'catalog.fact.inputs': 'Inputs',
@@ -195,11 +195,11 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'builder.hwDevice': 'Hardware type',
   'builder.hwDevice.input': 'Input hardware type',
   'builder.hwDevice.output': 'Output hardware type',
-  'builder.hwDevice.hint': 'The type comes from the server; leave the node empty to let FFmpeg choose, or test below when unsure. Either side may be left empty.',
+  'builder.hwDevice.hint': 'The type comes from the server; leaving the node empty lets FFmpeg pick the device, or test below when unsure. Neither side has to name a type either.',
   'builder.hwDevice.none': 'Unset (no -init_hw_device; hardware encoders initialise their own)',
   'builder.hwDevice.empty': 'This FFmpeg reports no hardware device types (`-init_hw_device list` is empty).',
   'builder.hwDevice.noDevices':
-    'No display device was found on the server. Types that need dedicated hardware (qsv, nvenc, amf and the like) may not work; if the server does have a GPU, the driver or the device permissions are the likely cause.',
+    'No display device was found on the server. Types that need dedicated hardware (qsv, vaapi, cuda and the like - whichever ones this FFmpeg reports) may not work; if the server does have a GPU, the driver or the device permissions are the likely cause.',
   'builder.hwDevice.typeMatch':
     'The type has to match the hardware: what FFmpeg reports is which types it supports, not which of them this machine can use.',
   'builder.hwDevice.sharedPipeline':
@@ -349,7 +349,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'workspace.input': 'Input file',
   'workspace.input.hint': 'Empty means nothing is selected yet; the directories below are on the server.',
   'workspace.output': 'Output file',
-  'workspace.output.hint': 'The output directory must already exist.',
+  'workspace.output.hint': 'Its directory must already exist - the workspace does not create one for you.',
   'workspace.output.derive': 'Name after input',
   'workspace.probe.loading': 'Reading media info',
   'workspace.params.title': 'Encoding parameters',
