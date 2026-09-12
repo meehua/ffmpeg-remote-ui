@@ -42,6 +42,10 @@ func TestIsAdapterIndex(t *testing.T) {
 // 注册表读不读得到、机器上有没有显示适配器，都不该让接口变成 null——
 // 前端拿到 null 之后一句 .length 就会把整棵 React 树带下去。
 //
+// 顺带钉住另一条约定：这里报出来的设备不带 HwNode。注册表子键的序号与 FFmpeg
+// 认的适配器序号不是同一套编号（见 windows.go 的注释），所以 Windows 上不给候选，
+// 「哪个值能用」只由实测回答。哪天真要在这里填值，这个用例会先红。
+//
 // 这里不假装机器上有几块 GPU：只要求返回的不是 nil。本机跑这个测试时
 // 日志里会打出实际发现的设备，可以直接看出注册表那条路通不通。
 func TestDiscoverRenderNodesNeverNull(t *testing.T) {
@@ -51,6 +55,9 @@ func TestDiscoverRenderNodesNeverNull(t *testing.T) {
 	}
 	t.Logf("发现 %d 个显示适配器", len(devices))
 	for _, d := range devices {
+		if d.HwNode != "" {
+			t.Errorf("%s 不该带设备节点 %q：注册表序号不是 FFmpeg 的适配器序号", d.ID, d.HwNode)
+		}
 		t.Logf("  %s | %s | %s | %s %s", d.ID, d.DeviceName, d.Driver, d.Vendor, d.DeviceID)
 	}
 }

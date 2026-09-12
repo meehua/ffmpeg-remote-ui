@@ -135,16 +135,26 @@ frontend            React frontend (no UI component library, no CSS framework)
   before the jobs are submitted — FFmpeg itself never creates them. Extensions
   stay the job of the naming settings, not of the structure.
 - **Hardware devices can be chosen explicitly**: the device type comes from
-  `ffmpeg -init_hw_device list` and the device node from the system's own device
-  list (`renderD*` under `/dev/dri` on Linux, the display adapters Windows
-  registers). A node is listed on both platforms: on Linux it is a path such as
-  `/dev/dri/renderD128`, on Windows the display adapter index (`0`, `1`, …). On
-  machines with more than one GPU (integrated plus discrete, say) FFmpeg picks one
-  on its own, and picking wrong shows up as "failed to open encoder". Selecting one
-  emits `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device
-  initialization is a global option and loses its meaning after the input. On
-  Windows you normally don't need a node at all: the device type (`d3d11va`, `qsv`,
-  `cuda`, …) is enough for FFmpeg to pick.
+  `ffmpeg -init_hw_device list`, and picking one emits
+  `-init_hw_device <type>=hw:<node>`, placed *before* `-i` — device initialization
+  is a global option and loses its meaning after the input. What `<node>` means is
+  decided by FFmpeg, per type, and the same value does not mean the same thing
+  across types: `1` is the second NVIDIA card for `cuda`, the second DXGI adapter
+  for `d3d11va`, and the "software implementation" selector for `qsv` (measured on
+  the machine here: `qsv=hw:1` fails with `Error creating a MFX session: -9`,
+  nothing to do with which card — qsv takes its adapter from its own
+  `child_device` option). So the node is neither pre-filled nor inferred: the
+  drop-down offers "Choose automatically" plus the values the system itself named
+  — on Linux a render node such as `/dev/dri/renderD128`; on Windows the display
+  adapters only have registry subkey numbers, which are *not* the adapter numbers
+  FFmpeg counts (measured here: registry subkey 3 is a virtual display adapter
+  while FFmpeg's number 2 is the integrated GPU), so none are listed there. Then
+  run "Test which combinations work": the server initialises the device once per
+  candidate — "choose automatically" plus a few small ordinals — and writes each
+  answer straight into that candidate's line in the drop-down (`0 · works ·
+  10de:2560 (NVIDIA GeForce RTX 3060 Laptop GPU)`); FFmpeg's full output sits on
+  the option's tooltip. Which value works is answered by FFmpeg alone, never by a
+  table inside the program.
 - **A type is not a capability promise**: when no device was discovered at all, the
   panel says so and warns that types needing dedicated hardware — `qsv` among them
   — may not work; when devices were found, it still warns that the type has to
@@ -325,11 +335,14 @@ docker run --device /dev/dri:/dev/dri --group-add render --group-add video …
 
 Once permissions work, pick a hardware device type (`qsv`, `vaapi`, …) and a node in
 the "encoding parameters" panel, and it will emit
-`-init_hw_device <type>=hw:<node>`. It is worth confirming that the encoder really
-works with a minimal command before running long jobs:
+`-init_hw_device <type>=hw:<node>`. What `<node>` means depends on the type, though:
+`vaapi` takes the DRM node path while `qsv` takes an MFX implementation selector and
+names its adapter through the `child_device` option. So when in doubt, read the
+FFmpeg output the "Test which combinations work" button gives you, copy it into a
+minimal command, and confirm the encoder really works before running long jobs:
 
 ```bash
-ffmpeg -hide_banner -init_hw_device qsv=hw:/dev/dri/renderD129 \
+ffmpeg -hide_banner -init_hw_device qsv=hw,child_device=/dev/dri/renderD129 \
   -f lavfi -i nullsrc -frames:v 1 -c:v hevc_qsv -f null -
 ```
 

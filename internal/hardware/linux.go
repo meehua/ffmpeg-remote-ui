@@ -26,8 +26,10 @@ func DiscoverRenderNodes() []Device {
 			RenderNode: node,
 			CardNode:   cards[sysfs],
 			SysfsPath:  sysfs,
-			// 喂给 FFmpeg 的那一段就是 render node 本身：它不依赖显示会话，
-			// 是 Linux 上 vaapi / qsv 这类类型真正要的节点。
+			// 这个节点本身是系统里真实存在的设备文件，路径就是它的名字，
+			// 不是我们从型号推出来的编号——所以可以直接当候选摆给用户。
+			// 它能不能用要看类型：vaapi 收的就是节点路径，qsv 收的却是 MFX
+			// 实现选择符（它的适配器另有 child_device 选项），这些由实测回答。
 			HwNode:     node,
 			Properties: map[string]string{},
 		}

@@ -239,9 +239,12 @@ export interface GpuDevice {
   cardNode?: string;
   sysfsPath?: string;
   /**
-   * 这个设备在 `-init_hw_device <type>=hw:<node>` 里该填的那一段：
-   * Linux 上是 DRM 节点路径，Windows 上是显示适配器序号。两边的平台差异在
-   * 服务器端消化，界面只按这一个字段列候选。
+   * 这个设备**自己名字里**能直接当 `-init_hw_device <type>=hw:<node>` 用的那一段，
+   * 只在系统给出确定名字时才有（Linux 的 DRM 节点路径）。Windows 上的显示适配器
+   * 只有注册表子键序号，与 FFmpeg 认的适配器序号不是同一套编号，所以那边为空。
+   *
+   * 它是「可以拿来试的值」，不是「该填的值」：同一个值在不同类型里的含义由 FFmpeg
+   * 解释，能不能用一律以实测结果为准。
    */
   hwNode?: string;
   driver?: string;
@@ -272,6 +275,21 @@ export interface HWProbe {
   /** 被实测的设备值；空串表示不指定节点。 */
   node: string;
   ok: boolean;
+  /**
+   * FFmpeg 自己说的「这个值落在了哪块设备上」，界面靠它回答「0 是哪块卡」。
+   *
+   * 取自 FFmpeg 的 `Using device 8086:9a60 (Intel(R) UHD Graphics).` 那一行，
+   * 只搬 `Using device ` 之后那段。有些类型不打印这行（cuda 就是），那就为空。
+   */
+  device?: string;
+  /** 这次初始化最后落下的一句话，失败时它就是原因本身（"Error creating a MFX session: -9."）。 */
+  note?: string;
+  /**
+   * FFmpeg 就这次初始化说过的话（原样截取，成功也给），界面收在「原文」里。
+   *
+   * 它是 device / note 的来源，也是它们取不到时的退路。程序不翻译这些行。
+   */
+  output?: string;
   /** 失败时 FFmpeg 自己的报错原文。 */
   error?: string;
 }

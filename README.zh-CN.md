@@ -108,14 +108,20 @@ frontend            React 前端（无 UI 组件库、无 CSS 框架）
   那份列表）并填入列表；打开「还原原目录结构」后，每个输出按相对扫描根的路径落位，
   输出目录会在提交前建好——FFmpeg 自己不会创建目录。扩展名始终归命名设置管，
   与结构还原无关。
-- **硬件设备可显式指定**：设备类型取自 `ffmpeg -init_hw_device list`，设备节点取自
-  系统自己的设备清单（Linux 上是 `/dev/dri` 的 `renderD*`，Windows 上是注册表里登记的
-  显示适配器）。节点在两边都列得出来：Linux 上填 `/dev/dri/renderD128` 这样的路径，
-  Windows 上填显示适配器序号（`0`、`1`…）。机器上有多块 GPU（例如核显 + 独显）时
-  FFmpeg 会自己挑一个，挑错就表现为「打开编码器失败」。选中后生成
-  `-init_hw_device <type>=hw:<node>`，并放在 `-i` 之前——设备初始化是全局选项，
-  放在输入之后就失去语义了。Windows 上通常不必指定节点，光设备类型（`d3d11va`、
-  `qsv`、`cuda`…）就够 FFmpeg 挑。
+- **硬件设备可显式指定**：设备类型取自 `ffmpeg -init_hw_device list`，选中后生成
+  `-init_hw_device <type>=hw:<node>`，并放在 `-i` 之前——设备初始化是全局选项，放在
+  输入之后就失去语义了。`<node>` 那一段是什么意思由 FFmpeg 按类型解释，而且同一个值
+  在不同类型里指的不是一回事：`1` 在 `cuda` 里是第 1 块 NVIDIA 卡，在 `d3d11va` 里是
+  第 1 个 DXGI 适配器，在 `qsv` 里却是 MFX 的实现选择符（本机实测 `qsv=hw:1` 报
+  `Error creating a MFX session: -9`，与哪块卡无关——qsv 挑适配器要用它自己的
+  `child_device` 选项）。所以节点既不预填也不推断：下拉里是「自动选择」加系统自己给出
+  名字的设备值（Linux 上是 `/dev/dri/renderD128` 这样的 render node；Windows 上的显示
+  适配器只有注册表子键序号，与 FFmpeg 认的适配器序号不是同一套编号——实测注册表第 3 个
+  子键是虚拟显示适配器，FFmpeg 的 2 号却是核显，所以那边一个都不列）。不确定就点
+  「实测可用组合」：服务器会把「自动选择」与几个小序数逐个真的初始化一次，每一条回答
+  直接写进下拉里的那一行（`0 · 可用 · 10de:2560 (NVIDIA GeForce RTX 3060 Laptop
+  GPU)`），FFmpeg 的完整原文挂在该选项的悬浮提示上。哪个值能用，答案只来自 FFmpeg，
+  不来自程序里的推断表。
 - **类型不是能力承诺**：一个设备都没发现时，面板会直接说明这一点，并提醒 `qsv`
   这类需要专用硬件的类型可能用不了；发现了设备时，它也会提醒类型要与硬件对得上——
   类型选错，FFmpeg 会在初始化设备那一步就失败。`-init_hw_device list` 回答的是
@@ -281,11 +287,13 @@ docker run --device /dev/dri:/dev/dri --group-add render --group-add video …
 ```
 
 权限通了之后，在「编码参数」面板选硬件设备类型（`qsv`、`vaapi`…）与节点，即可
-生成 `-init_hw_device <type>=hw:<node>`。建议先用最小命令确认编码器真的可用，
-再去跑长任务：
+生成 `-init_hw_device <type>=hw:<node>`。不过 `<node>` 的含义按类型而定：`vaapi` 收的
+就是 DRM 节点路径，`qsv` 收的却是 MFX 实现选择符，它的适配器要用 `child_device`
+选项指定。拿不准时先实测一次，再把结论那一项上悬浮出来的 FFmpeg 原文照抄成最小命令
+确认编码器真的可用，然后才去跑长任务：
 
 ```bash
-ffmpeg -hide_banner -init_hw_device qsv=hw:/dev/dri/renderD129 \
+ffmpeg -hide_banner -init_hw_device qsv=hw,child_device=/dev/dri/renderD129 \
   -f lavfi -i nullsrc -frames:v 1 -c:v hevc_qsv -f null -
 ```
 

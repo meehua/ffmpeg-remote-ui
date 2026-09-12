@@ -17,7 +17,13 @@ import { useAction, useAsync, useDebounced } from '../../hooks/useAsync';
 import type { MessageKey } from '../../i18n';
 import { useI18n } from '../../i18n/LocaleProvider';
 import { cx } from '../../utils/format';
-import { hwNodeOptions } from '../hardware/devices';
+import {
+  hwNodeChoices,
+  hwNodeManual,
+  probeCandidates,
+  type HwNodeChoice,
+  type HwNodeKind,
+} from '../hardware/devices';
 import {
   defaultPosition,
   type CliPosition,
@@ -85,6 +91,32 @@ function streamKindsOf(cliHelp: CliHelp | null): StreamKindInfo[] {
 }
 
 /**
+ * 每种设备节点候选中间那半句的词。
+ *
+ * 清单里那些名字（listed）不在这张表里：它们的文字本身就是型号与标识符，再加一个
+ * 状态词只是噪声。auto 与 manual 两项也不在：它们各自有一句话（不指定、手动填写），
+ * 那是这一项「是什么」，与实测结论不是一回事。
+ */
+const NODE_STATUS: Partial<Record<HwNodeKind, MessageKey>> = {
+  ok: 'builder.hwProbe.ok',
+  fail: 'builder.hwProbe.failed',
+  untested: 'builder.hwNode.untested',
+};
+
+/** 一行候选的文字：`值 · 结论 · 说的是什么`；空的那一段不占位。 */
+function hwNodeLabel(node: HwNodeChoice, t: (key: string) => string): string {
+  if (node.kind === 'manual') {
+    // 手填那一项没有值可写（它的值是哨兵），剩下的就是这句话。
+    return t('builder.hwNode.manual');
+  }
+  // 值为空表示「不指定」：这一项也要连结论一起写，否则实测之后单看一个「可用」，
+  // 根本看不出说的是哪一项。
+  const head = node.value === '' ? t('builder.hwNode.auto') : node.value;
+  const key = NODE_STATUS[node.kind];
+  return [head, key ? t(key) : '', node.text].filter((part) => part !== '').join(' · ');
+}
+
+/**
  * 由服务器真实能力驱动的参数构建器。
  *
  * 这里的结构不是设计出来的，是**读出来的**：
@@ -94,10 +126,11 @@ function streamKindsOf(cliHelp: CliHelp | null): StreamKindInfo[] {
  *   - 每个编码器的可调参数 → `ffmpeg -h encoder=<名>`；
  *   - 命令行有哪些选项、哪个要取值、属于哪一段 → `ffmpeg -h` 的分节与占位符。
  *
- * 硬件设备是唯一保留结构化的特例：它的值由「类型 + 节点」拼成，两者分别来自
- * `ffmpeg -init_hw_device list` 与 /dev/dri，都是服务器报告的事实。
- * 多 GPU 的机器上 FFmpeg 自己挑设备可能挑错（表现为「打开编码器失败」），
- * 所以把选择权交给用户，而不是替它猜。
+ * 硬件设备是唯一保留结构化的特例：它的值由「类型 + 节点」拼成，类型来自
+ * `ffmpeg -init_hw_device list`，节点则是用户可以填、也可以不填的一段字符。
+ * 这一段是什么意思只有 FFmpeg 自己知道——同一个 `1` 在 cuda 眼里是「第 1 块
+ * NVIDIA 卡」，在 qsv 眼里是「软件实现」，在 d3d11va 眼里是「第 1 个 DXGI 适配器」，
+ * 所以这里既不预填也不推断：能试的值交给实测，答案连着 FFmpeg 的原文一起摆出来。
  */
 export function CommandBuilder({
   snapshot,
@@ -107,31 +140,43 @@ export function CommandBuilder({
   onChange,
 }: CommandBuilderProps) {
   const { t } = useI18n();
-  // 设备节点候选来自共享的设备逻辑模块：Linux 上是 DRM 节点路径，Windows 上是
-  // 适配器序号，怎么取由服务器端的发现实现决定，界面不分叉。
-  const nodes = useMemo(() => hwNodeOptions(devices), [devices]);
   const streamKinds = useMemo(() => streamKindsOf(cliHelp), [cliHelp]);
 
   const setHwDevice = (patch: Partial<EncodeSettings['hwDevice']>) =>
     onChange({ ...settings, hwDevice: { ...settings.hwDevice, ...patch } });
 
-  // 实测结果：null 表示还没测过，与「测了但一个都没成」区分开。
-  const [probes, setProbes] = useState<HWProbe[] | null>(null);
+  // 实测结果连着它测的是哪个类型一起存：同一个 `1` 在 cuda 眼里是第 1 块 NVIDIA 卡、
+  // 在 qsv 眼里是软件实现，换了类型旧结论就不作数，所以只在类型对得上时才采用。
+  const [probes, setProbes] = useState<{ type: string; results: HWProbe[] } | null>(null);
   const probe = useAction();
+  const results = probes && probes.type === settings.hwDevice.type ? probes.results : null;
+
+  // 下拉停在「手动填写」那一项时才出文本框。它与设备值是两回事：值仍然存在
+  // settings.hwDevice.device 里，这个标记只表示「不从上面的候选里挑」。
+  const [manual, setManual] = useState(false);
+
+  // 设备节点的全部候选：不指定、实测过的值、清单里系统给了名字的值、手填过的值，
+  // 最后是手填这一项。每一条的结论都是 FFmpeg 说的，界面不替它下判断。
+  const nodes = useMemo(
+    () => hwNodeChoices(devices, results, settings.hwDevice.device),
+    [devices, results, settings.hwDevice.device],
+  );
+  // 手填过的值也留着文本框：否则重开一次界面，下拉停在那条「未实测」上，想改都没处改。
+  const editing = manual || nodes.some((node) => node.kind === 'untested');
 
   /**
-   * 让服务器把当前类型配每一个候选都试一遍。
+   * 让服务器把当前类型配每个候选都试一遍。
    *
-   * 空串排在最前：不指定节点是第一个该试的组合。设备值的含义随类型而变
-   * （cuda 认 CUDA 设备序号、vaapi 认 DRM 节点、Windows 上的 qsv 认显示适配器
-   * 序号），程序不猜——哪一组成立只有 FFmpeg 自己知道。
+   * 候选里既有「不指定」（第一个该试的组合），也有几个小序数与设备清单里的名字；
+   * 哪些是序数、哪些能用，都不是这里判断的——界面只是把一串值报上去，让 FFmpeg
+   * 每个都回答一次，再把它的原话摆回来。
    */
   const runProbe = () => {
     const type = settings.hwDevice.type;
-    const candidates = ['', ...nodes.map((node) => node.value)];
+    const candidates = probeCandidates(devices, settings.hwDevice.device);
     void probe.run(async () => {
       const result = await api.hardwareProbe(type, candidates);
-      setProbes(result.results);
+      setProbes({ type, results: result.results });
     });
   };
 
@@ -166,21 +211,47 @@ export function CommandBuilder({
 
       {settings.hwDevice.type !== '' ? (
         <>
+          {/* 设备值不预填、也不从设备清单里推：候选里既有清单给出的名字，也有实测过的
+              值，还有「不指定」——那一条就是让 FFmpeg 自己挑，实测会把它排在最前面。
+              每条候选写着的结论都来自 FFmpeg，完整原文挂在该选项的 title 上。 */}
           <Field label={t('builder.hwNode')} hint={t('builder.hwNode.hint')}>
             <Select
-              value={settings.hwDevice.device}
-              onChange={(event) => setHwDevice({ device: event.target.value })}
+              value={manual ? hwNodeManual : settings.hwDevice.device}
+              aria-label={t('builder.hwNode')}
+              onChange={(event) => {
+                const next = event.target.value;
+                setManual(next === hwNodeManual);
+                // 选了「手动填写」不动设备值：上一个值还留着，用户接着改它的文本。
+                if (next !== hwNodeManual) {
+                  setHwDevice({ device: next });
+                }
+              }}
             >
-              <option value="">{t('builder.hwNode.auto')}</option>
               {nodes.map((node) => (
-                <option key={node.value} value={node.value} title={node.detail}>
-                  {node.label}
+                <option
+                  key={node.value === '' ? 'auto' : node.value}
+                  value={node.value}
+                  title={node.detail || undefined}
+                >
+                  {hwNodeLabel(node, t)}
                 </option>
               ))}
             </Select>
           </Field>
 
-          {/* 「哪个设备值能用」不靠猜：让服务器真的初始化一次，由 FFmpeg 回答。 */}
+          {editing ? (
+            <Field label={t('builder.hwNode.manual')}>
+              <TextInput
+                value={settings.hwDevice.device}
+                placeholder={t('builder.hwNode.placeholder')}
+                aria-label={t('builder.hwNode')}
+                onChange={(event) => setHwDevice({ device: event.target.value })}
+              />
+            </Field>
+          ) : null}
+
+          {/* 「哪个设备值能用」不靠猜：让服务器真的初始化一次，由 FFmpeg 回答；回答
+              随后出现在上面的下拉里，每个值那一行写的就是它给的结论。 */}
           <div className={styles.probe}>
             <Button compact onClick={runProbe} disabled={probe.pending}>
               {probe.pending ? t('builder.hwProbe.running') : t('builder.hwProbe.run')}
@@ -189,24 +260,6 @@ export function CommandBuilder({
           </div>
 
           {probe.error ? <ErrorNote>{probe.error.message}</ErrorNote> : null}
-
-          {probes ? (
-            <ul className={styles.probes}>
-              {probes.map((item) => (
-                <li
-                  key={item.node || 'auto'}
-                  className={cx(styles.probeItem, item.ok && styles.probeOk)}
-                >
-                  <span className={styles.probeNode}>
-                    {item.node === '' ? t('builder.hwNode.auto') : item.node}
-                  </span>
-                  <span>{item.ok ? t('builder.hwProbe.ok') : t('builder.hwProbe.failed')}</span>
-                  {/* 失败时把 FFmpeg 的原话摆出来，不替它总结。 */}
-                  {item.error ? <pre className={styles.probeError}>{item.error}</pre> : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
         </>
       ) : null}
 

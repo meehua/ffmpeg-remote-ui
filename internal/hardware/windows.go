@@ -4,7 +4,6 @@ package hardware
 
 import (
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -37,8 +36,13 @@ const (
 //
 // 名字沿用 Linux 那边的叫法（那里的设备就是 DRM render node），返回的也是同一个
 // Device 结构，于是 /api/hardware 与界面都不用为平台分叉。Windows 没有 DRM
-// render node，RenderNode / CardNode / SysfsPath 一律留空，只有 HwNode 填成
-// 适配器序号——界面列「设备节点」候选时看的就是它。
+// render node，RenderNode / CardNode / SysfsPath 一律留空。
+//
+// HwNode 也留空，尽管每个子键都带一个序号。理由是实测对不上：注册表列的是「显示类
+// 驱动」，FFmpeg 的 d3d11va 数的是 DXGI 的物理适配器，两套编号各有各的成员（本机上
+// 注册表第 3 个子键是虚拟显示适配器，FFmpeg 的 2 号却是核显）。把子键序号当设备值
+// 是在替用户猜，而猜错的表现就是「打开编码器失败」。「哪个值能用」因此只剩一个
+// 来源：让 FFmpeg 真的初始化一次（ffmpeg.ProbeHWDevice）。
 //
 // 读不到任何东西时返回空切片而不是 nil：JSON 里是 [] 而不是 null，前端不必为
 // 「没有 GPU」另写一个判空分支。注册表读不动也只是这里空着，不影响其余功能。
@@ -116,28 +120,15 @@ func readAdapter(index string) (Device, bool) {
 		Driver:     values["DriverVersion"],
 		VendorName: values["ProviderName"],
 		DeviceName: desc,
-		// Windows 没有 DRM 节点可填，d3d11va / dxva2 这类类型收的是适配器序号，
-		// 于是「设备节点」在 Windows 上填序号：界面那一格不再是空的。
-		HwNode: adapterNumber(index),
+		// 不填 HwNode：这个子键的名字只是注册表自己的编号，与 FFmpeg 认的适配器
+		// 序号不是同一套（见 DiscoverRenderNodes 的注释）。界面因此不会替用户
+		// 预选一个数字，「哪个值能用」由实测回答。
 		// 原始键值原样交给界面，用户点开就能看到全部字段，
 		// 我们不需要为每个寄存器式的取值编一套字段名。
 		Properties: values,
 	}
 	d.Vendor, d.DeviceID = parseMatchingDeviceID(values["MatchingDeviceId"])
 	return d, true
-}
-
-// adapterNumber 把注册表子键名（0000、0001…）转成适配器序号（0、1…）。
-//
-// 去掉前导零：写进 `-init_hw_device` 的是序号本身，`0000` 不是 FFmpeg 认的写法。
-// 子键顺序就是显示适配器的枚举顺序，所以它通常与 FFmpeg 认的那个序号是同一条；
-// 但这不是操作系统给出的承诺，真对不上时把节点留空、让 FFmpeg 自己挑更稳。
-func adapterNumber(index string) string {
-	n, err := strconv.Atoi(index)
-	if err != nil {
-		return index
-	}
-	return strconv.Itoa(n)
 }
 
 // isAdapterIndex 判断子键名是不是设备序号：恰好四位数字（0000、0001…）。

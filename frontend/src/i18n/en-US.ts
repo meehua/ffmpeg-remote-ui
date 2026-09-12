@@ -90,7 +90,6 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'hw.devices.empty.hint': 'This account may not have permission to read the devices, or the machine simply has none.',
   'hw.field.model': 'model',
   'hw.field.vendor': 'vendor',
-  'hw.field.hwNode': 'device node',
   'hw.field.renderNode': 'render node',
   'hw.field.cardNode': 'card node',
   'hw.field.pci': 'PCI',
@@ -194,21 +193,24 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
 
   /* ------------------------------------------------------ Command builder */
   'builder.hwDevice': 'Hardware device',
-  'builder.hwDevice.hint': 'The device type and the node both come from the server; naming them explicitly stops FFmpeg from picking the wrong device when there are several GPUs.',
+  'builder.hwDevice.hint': 'The device type comes from the server; leave the node empty to let FFmpeg choose, or test below when unsure.',
   'builder.hwDevice.none': 'Do not initialise (leave it to FFmpeg)',
   'builder.hwDevice.empty': 'This FFmpeg reports no hardware device types (`-init_hw_device list` is empty).',
   'builder.hwDevice.noDevices':
     'No display device was found on the server. Types that need dedicated hardware (qsv, nvenc, amf and the like) may not work; if the server does have a GPU, the driver or the device permissions are the likely cause.',
   'builder.hwDevice.typeMatch':
-    'The type has to match the hardware: what FFmpeg reports is which types it supports, not which of them this machine can use — a mismatch fails right at device initialisation.',
+    'The type has to match the hardware: what FFmpeg reports is which types it supports, not which of them this machine can use.',
   'builder.hwNode': 'Device node',
-  'builder.hwNode.hint': 'Leave empty to let FFmpeg pick within the selected type; on Windows this is the display adapter index.',
+  'builder.hwNode.hint': 'What this value means depends on the type; the app will not guess it for you. "Choose automatically" leaves it to FFmpeg, and a tested value carries FFmpeg\'s own answer.',
+  'builder.hwNode.placeholder': 'e.g. 0, 1 or /dev/dri/renderD128',
   'builder.hwNode.auto': 'Choose automatically',
+  'builder.hwNode.manual': 'Fill in manually…',
+  'builder.hwNode.untested': 'not tested',
   'builder.hwProbe.run': 'Test which combinations work',
   'builder.hwProbe.running': 'Testing…',
-  'builder.hwProbe.hint': 'The server actually initialises the device once, so the answer comes from FFmpeg rather than from a guess.',
+  'builder.hwProbe.hint': 'The server initialises the device once; the answer comes from FFmpeg.',
   'builder.hwProbe.ok': 'works',
-  'builder.hwProbe.failed': 'fails',
+  'builder.hwProbe.failed': 'does not work',
   'builder.stream.encoder': '{media} encoder',
   'builder.stream.encoder.hint': 'copy means this stream is passed through instead of re-encoded; leaving it unset lets the output format pick an encoder.',
   'builder.stream.codec.unset': 'Unset (the output format picks the default encoder)',
@@ -363,7 +365,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'error.job.cancelled': 'Cancelled',
 
   'error.hw.type_unknown': 'Unknown hardware device type: {type}',
-  'error.hw.node_unknown': 'This server has not reported a device node {node}',
+  'error.hw.node_invalid': 'The device value {node} cannot be used in -init_hw_device',
   'error.hw.too_many_probes': 'At most {max} devices can be tested at once',
 
   'error.body.invalid_json': 'The request body is not valid JSON: {cause}',

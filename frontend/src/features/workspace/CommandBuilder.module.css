@@ -187,48 +187,10 @@ summary.sectionHead {
   font-size: var(--text-xs);
 }
 
-/* 实测可用组合：一行一个候选，失败时把 FFmpeg 的原文摊在下面。 */
+/* 实测按钮与它旁边那句说明；结论直接写在上面的设备节点下拉里。 */
 .probe {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-sm);
-}
-
-.probes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-2xs);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.probeItem {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--gap-2xs) var(--gap-sm);
-  padding-block: var(--gap-2xs);
-  padding-inline: var(--gap-sm);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  font-size: var(--text-xs);
-}
-
-/* 能用的组合只把边线提亮一点：成败由文字说明，不靠颜色单独传达。 */
-.probeOk {
-  border-color: var(--text-faint);
-}
-
-.probeNode {
-  font-family: var(--font-mono);
-}
-
-/* FFmpeg 的原文可能多行，原样折行显示。 */
-.probeError {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--text-faint);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }

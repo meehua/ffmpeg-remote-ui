@@ -19,11 +19,18 @@ type Device struct {
 	RenderNode string `json:"renderNode,omitempty"`
 	CardNode   string `json:"cardNode,omitempty"`
 	SysfsPath  string `json:"sysfsPath,omitempty"`
-	// HwNode 是这个设备在 `-init_hw_device <type>=hw:<node>` 里该填的那一段：
-	// Linux 上是 DRM 节点路径，Windows 上是显示适配器的序号。
+	// HwNode 是这个设备本身的名字里、能直接当 `-init_hw_device <type>=hw:<node>`
+	// 用的那一段，只在系统给出确定名字时才填：Linux 上是 /dev/dri/renderD* 的路径，
+	// 它既是系统里真实存在的设备文件，也是文档里 vaapi 一类接受的写法。
 	//
-	// 它两边都非空，与上面三个只在 Linux 有意义的字段分开，是为了让界面只按
-	// 一个字段列候选——平台差异在各自的发现实现里消化掉，不扩散到界面。
+	// Windows 上留空。那里的显示适配器只有注册表子键序号，而 FFmpeg 数的是 DXGI 的
+	// 物理适配器，两套编号不是一回事（实测：注册表第 3 个子键是虚拟显示适配器，
+	// FFmpeg 的 2 号却是核显）。宁可不给候选，也不给一个要用户去赌的数字。
+	//
+	// 更要紧的是：这个字段并不表示「所有类型都该填它」。同一个值在不同类型里的
+	// 含义由 FFmpeg 自己解释——cuda 数的是 CUDA 设备，qsv 收到的却是 MFX 实现
+	// 选择符（`1` 在它眼里是「软件实现」）——所以界面上它只作为可填的候选摆出来，
+	// 能不能用一律以实测为准。
 	HwNode     string            `json:"hwNode,omitempty"`
 	Driver     string            `json:"driver,omitempty"`
 	Vendor     string            `json:"vendor,omitempty"`
