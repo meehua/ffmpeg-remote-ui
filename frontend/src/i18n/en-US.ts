@@ -285,7 +285,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'workspace.input.hint': 'Empty means nothing is selected yet; the directories below are on the server.',
   'workspace.output': 'Output file',
   'workspace.output.hint': 'The output directory must already exist.',
-  'workspace.output.browse': 'Choose an output directory',
+  'workspace.output.derive': 'Name after input',
   'workspace.probe.loading': 'Reading media info',
   'workspace.params.title': 'Encoding parameters',
   'workspace.params.description': "The structure of streams and options comes from ffmpeg's own sections; values come from its -h output.",

@@ -1,23 +1,15 @@
-.fold {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
+/* 输出路径与「按输入命名」并排：输入框吃掉剩余宽度，按钮按内容占位；
+   窄到放不下时按钮整体落到下一行，而不是把路径压成看不清的一小截。 */
+.outputRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
 }
 
-.foldSummary {
-  padding-block: var(--gap-xs);
-  padding-inline: var(--gap-sm);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.fold[open] .foldSummary {
-  border-block-end: 1px solid var(--line);
-}
-
-.fold > :not(summary) {
-  padding: var(--gap-xs);
+.outputRow > input {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
 }
 
 .probe {

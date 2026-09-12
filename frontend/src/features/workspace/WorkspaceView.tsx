@@ -15,7 +15,7 @@ import { Pane, Panes } from '../../components/Pane';
 import { useAction, useAsync } from '../../hooks/useAsync';
 import { usePersistentState } from '../../hooks/usePersistentState';
 import { useI18n, type I18n } from '../../i18n/LocaleProvider';
-import { formatBytes, formatDuration, toNumber } from '../../utils/format';
+import { dirName, formatBytes, formatDuration, toNumber } from '../../utils/format';
 import { JobPanel } from '../jobs/JobPanel';
 import { FileBrowser } from '../media/FileBrowser';
 import { PresetBar } from '../presets/PresetBar';
@@ -33,6 +33,7 @@ import {
   withOverwrite,
   type EncodeSettings,
 } from './args';
+import { outputPathFor } from './naming';
 import styles from './WorkspaceView.module.css';
 
 interface WorkspaceViewProps {
@@ -52,6 +53,17 @@ interface WorkspaceViewProps {
  */
 const initialSettings = withOverwrite(emptySettings, true);
 
+/** 浏览器此刻在为哪个字段挑东西。 */
+type PickTarget = 'input' | 'output';
+
+/**
+ * 按输入推导输出路径时加的后缀。
+ *
+ * 不能省：推出来的路径若与输入完全同名，叠上默认开启的 `-y` 就会把源文件直接
+ * 覆盖掉。名字里带一段标记既安全，也一眼看得出这是转码产物。
+ */
+const DERIVED_SUFFIX = '-out';
+
 /** 工作区：挑服务器上的文件、配参数、看命令、入队。 */
 export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: WorkspaceViewProps) {
   const { t } = useI18n();
@@ -69,6 +81,9 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
   const [manualArgs, setManualArgs] = usePersistentState('workspace.manualArgs', '');
   // 「已加入队列」是一次性的反馈，不属于需要保留的配置。
   const [queued, setQueued] = useState(false);
+  // 浏览器在为谁挑东西。这是「我正在干什么」，不是需要留到下次的配置，
+  // 所以它不进本地存档。
+  const [target, setTarget] = useState<PickTarget>('input');
 
   const probe = useAsync<MediaInfo | null>(
     () => (input === '' ? Promise.resolve(null) : api.probe(input)),
@@ -96,6 +111,22 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
   const applyRecipe = (loaded: Recipe) => {
     setSettings(loaded.settings);
     setExtraArgs(loaded.extraArgs);
+  };
+
+  /**
+   * 按输入推导输出路径：同一个目录，文件名加一段后缀。
+   *
+   * 走的是和批处理同一个 outputPathFor——只有一份命名规则，工作区与批处理才不会
+   * 对同一个文件给出两个答案。
+   */
+  const deriveOutput = () => {
+    const source = input.trim();
+    if (source === '') {
+      return;
+    }
+    setOutput(
+      outputPathFor(source, { dir: dirName(source), suffix: DERIVED_SUFFIX, ext: '', root: '' }),
+    );
   };
 
   const submit = async () => {
@@ -130,20 +161,33 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
           />
         </Field>
 
-        <FileBrowser value={input} onPick={setInput} mode="file" />
-
         <Field label={t('workspace.output')} hint={t('workspace.output.hint')}>
-          <TextInput
-            value={output}
-            placeholder="/data/out/result.mp4"
-            onChange={(event) => setOutput(event.target.value)}
-          />
+          <div className={styles.outputRow}>
+            <TextInput
+              value={output}
+              placeholder="/data/out/result.mp4"
+              onChange={(event) => setOutput(event.target.value)}
+            />
+            {/* 长路径手打一遍不值得。推导出来的名字可以继续改，也可以直接清掉重写。 */}
+            <Button compact disabled={input.trim() === ''} onClick={deriveOutput}>
+              {t('workspace.output.derive')}
+            </Button>
+          </div>
         </Field>
 
-        <details className={styles.fold}>
-          <summary className={styles.foldSummary}>{t('workspace.output.browse')}</summary>
-          <FileBrowser value={output} onPick={setOutput} mode="dir" />
-        </details>
+        {/* 输入与输出共用一个浏览器，顶部那条切换条决定这次点下去写进谁。
+            两个字段各配一个列表，一屏里就有两份几乎一样的内容，还容易点错。 */}
+        <FileBrowser
+          value={target === 'input' ? input : output}
+          onPick={target === 'input' ? setInput : setOutput}
+          mode={target === 'input' ? 'file' : 'dir'}
+          scopes={[
+            { id: 'input', label: t('workspace.input') },
+            { id: 'output', label: t('workspace.output') },
+          ]}
+          scope={target}
+          onScopeChange={(next) => setTarget(next === 'output' ? 'output' : 'input')}
+        />
 
         {probe.loading ? <Spinner label={t('workspace.probe.loading')} /> : null}
         {probe.error ? <ErrorNote>{probe.error}</ErrorNote> : null}

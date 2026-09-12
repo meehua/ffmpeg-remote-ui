@@ -70,6 +70,9 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
         return (
           <article key={job.id} className={styles.job}>
             <header className={styles.head}>
+              {/* 标题行只放文件名：长路径在这里会把状态徽标挤走。
+                  完整路径在下面单独一行给出——任务跑完时「文件到底在哪」比
+                  「它叫什么」更值得看见。 */}
               <p className={styles.paths}>
                 <span className={styles.path} title={job.input}>
                   {baseName(job.input)}
@@ -107,6 +110,15 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
 
             {job.totalSize && job.totalSize > 0 ? (
               <p className={styles.meta}>{t('job.written', { size: formatBytes(job.totalSize) })}</p>
+            ) : null}
+
+            {job.status === 'done' && job.output ? (
+              <p className={styles.output}>
+                <span className={styles.outputLabel}>{t('workspace.output')}</span>
+                <span className={styles.outputPath} title={job.output}>
+                  {job.output}
+                </span>
+              </p>
             ) : null}
 
             <p className={styles.command} title={job.command}>
@@ -155,6 +167,10 @@ export function JobPanel({ jobs, logs }: JobPanelProps) {
               >
                 {open ? t('job.logs.hide') : t('job.logs.show', { count: lines.length })}
               </Button>
+
+              {job.output ? (
+                <CopyButton compact text={job.output} label={t('common.copy')} />
+              ) : null}
 
               <CopyButton compact text={job.command} label={t('job.copyCommand')} />
             </ButtonRow>

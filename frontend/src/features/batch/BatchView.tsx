@@ -23,6 +23,7 @@ import {
   type EncodeSettings,
   type Platform,
 } from '../workspace/args';
+import { outputPathFor } from '../workspace/naming';
 import { ExtensionPicker } from './ExtensionPicker';
 import styles from './BatchView.module.css';
 
@@ -39,52 +40,6 @@ interface BatchViewProps {
 }
 
 const PREVIEW_LIMIT = 12;
-
-/** 去掉最后一个扩展名；没有扩展名时原样返回。 */
-function stripExtension(name: string): string {
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(0, dot) : name;
-}
-
-/**
- * 输入文件相对扫描根的那一段（保留子目录、去掉扩展名）。
- *
- * 返回 null 表示这个文件不在扫描根下（用户手工加进来的，或者换了扫描根），
- * 此时退回平铺到输出目录，而不是猜一个结构出来。
- */
-function relativeStem(input: string, root: string): string | null {
-  const rel = relativeTo(input, root.trim());
-  if (rel === null) {
-    return null;
-  }
-  const name = baseName(rel);
-  return rel.slice(0, rel.length - name.length) + stripExtension(name);
-}
-
-interface OutputNaming {
-  dir: string;
-  suffix: string;
-  ext: string;
-  /** 还原目录结构时的参照根；为空表示平铺。 */
-  root: string;
-}
-
-/**
- * 按「目录 + 相对路径 + 后缀 + 扩展名」推出输出路径。
- *
- * 扩展名始终由「输出扩展名」设置决定：还原目录结构只负责把文件放回原来的
- * 子目录，命名仍然归命名设置管，两件事互不干扰。
- */
-function outputPathFor(input: string, naming: OutputNaming): string {
-  const name = baseName(input);
-  const original = name.slice(stripExtension(name).length).replace(/^\./, '');
-  const wanted = naming.ext.trim().replace(/^\./, '');
-  const extension = wanted !== '' ? wanted : original;
-  const tail = extension === '' ? '' : `.${extension}`;
-
-  const prefix = relativeStem(input, naming.root) ?? stripExtension(name);
-  return `${naming.dir.replace(/\/+$/, '')}/${prefix}${naming.suffix}${tail}`;
-}
 
 /** 输出文件所在的目录，去重后用于提交前预先创建。 */
 function uniqueDirs(outputs: string[]): string[] {

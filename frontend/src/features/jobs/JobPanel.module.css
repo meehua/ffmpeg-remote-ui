@@ -67,6 +67,28 @@
   font-size: var(--text-xs);
 }
 
+/* 完成后的输出路径：整条路径换行显示完整，而不是截成一个看不出出处的文件名。 */
+.output {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-xs);
+  font-size: var(--text-xs);
+}
+
+.outputLabel {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.outputPath {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 .command {
   padding-block: var(--gap-2xs);
   padding-inline: var(--gap-xs);

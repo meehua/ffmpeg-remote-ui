@@ -290,7 +290,7 @@ export const zhCN = {
   'workspace.input.hint': '留空表示还没选；下面是服务器上的目录。',
   'workspace.output': '输出文件',
   'workspace.output.hint': '输出目录必须已存在。',
-  'workspace.output.browse': '选择输出目录',
+  'workspace.output.derive': '按输入命名',
   'workspace.probe.loading': '读取媒体信息',
   'workspace.params.title': '编码参数',
   'workspace.params.description': '流与选项的结构来自 ffmpeg 自己的分节，取值来自它的 -h 输出。',
