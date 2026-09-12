@@ -8,6 +8,11 @@
  *     Subtitle/Data options 分节——因此这里没有把「只有视频和音频」写死；
  *   - 选项插在命令行的哪一段，默认值由 ffmpeg 在分节标题里的措辞决定。
  *
+ * 参数的来源也全部是 ffmpeg 自己：编码器/解码器/滤镜/bsf/muxer/demuxer/
+ * 协议的私有 AVOptions 各有各的 `-h <target>=<名>`，公共上下文那层在
+ * `-h full`（见 api.optionGroups）。模型只负责把它们放到命令行上正确的位置，
+ * 不判断哪个参数有用。
+ *
  * 拆分/引号规则与后端 internal/ffmpeg 完全一致（两边都按平台分 POSIX 与 cmd 两套）：
  * 界面上看到的参数切分，就是服务器最终执行的那一份，避免「预览对了、执行错了」。
  */
@@ -28,7 +33,9 @@ export type CliPosition = 'global' | 'input' | 'output';
  * 输出侧时 ffmpeg 会直接报 "you are trying to apply an input option to an
  * output file"。与其在代码里给它开一个特例，不如把位置做成可改的字段。
  */
-export interface CliValue {
+export interface CliEntry {
+  /** 选项名，不含前导 '-'。 */
+  name: string;
   /** 选项值；开关型选项这里是空串。 */
   value: string;
   /** ffmpeg 是否需要这个选项取值（没有占位符的就是开关）。 */
@@ -44,7 +51,50 @@ export interface CliValue {
 }
 
 /**
- * 一类流的编码设置。
+ * 一组「选项名 -> 取值」。
+ *
+ * 组件的私有参数（编码器、解码器、滤镜、bsf、muxer、协议…）都用这个形状带着：
+ * 取值一律是 ffmpeg 自己定义的字符串，界面只负责原样交回去。
+ */
+export type OptionValues = Record<string, string>;
+
+/**
+ * 输入或输出侧的格式组件：`-f` 指定的那个名字，以及它自己的参数。
+ *
+ * 输入侧的候选来自 demuxer 与设备（FFmpeg 把 v4l2 这类设备实现成 demuxer），
+ * 输出侧来自 muxer。名字和参数都来自 `ffmpeg -h <target>=<名>`：`-movflags
+ * +faststart` 里的 movflags 就是 muxer 自己注册的 AVOption，程序不维护清单。
+ */
+export interface FormatSetting {
+  /** `-f` 的取值；空串表示不生成 `-f`，由 ffmpeg 按文件名推断。 */
+  name: string;
+  /** 该组件的私有 AVOptions，直接作为命令行选项生成。 */
+  options: OptionValues;
+}
+
+/**
+ * 一个协议及其参数。
+ *
+ * 协议名来自输入/输出地址的 scheme（`rtmp://…` → rtmp）。候选值取自
+ * `ffmpeg -protocols`，参数取自 `ffmpeg -h protocol=<名>`——例如 http 的
+ * `-http_proxy`，它同样是注册在 URLContext 上的普通选项。
+ */
+export interface ProtocolSetting {
+  /** 协议名；空串表示这个方向不生成协议参数。 */
+  name: string;
+  options: OptionValues;
+}
+
+/** `-filter_complex` 的图，以及把它的输出接到输出文件上的 `-map`。 */
+export interface FilterComplexSetting {
+  /** 滤镜图原文，例如 `[0:v]scale=1280:-1[outv]`。 */
+  graph: string;
+  /** 按顺序生成的 `-map` 取值，例如 `[outv]` 或 `0:a`。 */
+  maps: string[];
+}
+
+/**
+ * 一类流的编解码设置。
  *
  * 键是 ffmpeg 的流定位符（v/a/s/d）。它不写死在这里，而是由界面从
  * `/api/ffmpeg/cli` 的分节里取（Video options → v，Audio options → a …）。
@@ -57,7 +107,33 @@ export interface StreamSetting {
    */
   codec: string;
   /** 该编码器的 AVOptions，条目来自 `ffmpeg -h encoder=<名>`。 */
-  options: Record<string, string>;
+  options: OptionValues;
+  /**
+   * 解码器名，对应**输入侧**的 `-c:<spec>`。
+   *
+   * 与 codec 分开存：解码器必须早于 `-i`，编码器必须晚于它，两者在命令行上
+   * 是两个不同的位置。空串的含义与 codec 相同——不生成这一段。
+   */
+  decoder: string;
+  /** 解码器的 AVOptions，条目来自 `ffmpeg -h decoder=<名>`。 */
+  decoderOptions: OptionValues;
+  /**
+   * bitstream filter 名，对应 `-bsf:<spec>`。
+   *
+   * 它与滤镜不是一回事：滤镜处理解码之后的帧，bsf 处理还没解开的码流，
+   * 所以它落在编码之后、进容器之前。
+   */
+  bitstreamFilter: string;
+  /** 该 bsf 的 AVOptions，条目来自 `ffmpeg -h bsf=<名>`。 */
+  bitstreamOptions: OptionValues;
+  /**
+   * 这一路流的简单滤镜链，对应 `-filter:<spec>`。
+   *
+   * 存的是 ffmpeg 的滤镜图原文（`scale=1280:-1,fps=30`）。参数不在这里结构化：
+   * 滤镜图是可嵌套的语法，硬拆成表单只会挡住 ffmpeg 支持的写法。需要成图、
+   * 需要多路输入时用 filterComplex。
+   */
+  filter: string;
 }
 
 /**
@@ -75,17 +151,50 @@ export interface HwDeviceSetting {
 }
 
 export interface EncodeSettings {
-  /** 命令行选项：选项名（不含 -）-> 取值。分节信息由界面按需查 cliHelp。 */
-  cli: Record<string, CliValue>;
+  /**
+   * 命令行选项，**按顺序**排列。
+   *
+   * 是数组而不是「名字 -> 取值」的映射：ffmpeg 允许同一个选项重复出现
+   * （`-map`、`-metadata`…），映射结构上就存不下第二份。哪些选项可以重复、
+   * 能重复几次，只有用户知道，所以这里不做任何预判——顺序就是命令里的顺序。
+   */
+  cli: CliEntry[];
   /** 每类流的设置；没配置过的类别就是缺席，界面按空处理。 */
   streams: Record<string, StreamSetting>;
   hwDevice: HwDeviceSetting;
+  /** 输入侧：`-f` 指定的 demuxer（设备也在这一列）及其实例参数。 */
+  inputFormat: FormatSetting;
+  /** 输出侧：`-f` 指定的 muxer 及其实例参数。 */
+  outputFormat: FormatSetting;
+  /** 输入地址的协议参数；协议名从地址的 scheme 读出。 */
+  inputProtocol: ProtocolSetting;
+  /** 输出地址的协议参数。 */
+  outputProtocol: ProtocolSetting;
+  /** `-filter_complex` 的图与它挂到输出上的 `-map`。 */
+  filterComplex: FilterComplexSetting;
 }
 
+/** 一路流的空白设置；界面在某类流还没配置过时用它兜底。 */
+export const emptyStream: StreamSetting = {
+  codec: '',
+  options: {},
+  decoder: '',
+  decoderOptions: {},
+  bitstreamFilter: '',
+  bitstreamOptions: {},
+  filter: '',
+};
+
+/** 一份空设置：cli 是空数组（不是空对象），其余字段各自留空。 */
 export const emptySettings: EncodeSettings = {
-  cli: {},
+  cli: [],
   streams: {},
   hwDevice: { type: '', device: '' },
+  inputFormat: { name: '', options: {} },
+  outputFormat: { name: '', options: {} },
+  inputProtocol: { name: '', options: {} },
+  outputProtocol: { name: '', options: {} },
+  filterComplex: { graph: '', maps: [] },
 };
 
 /**
@@ -93,15 +202,17 @@ export const emptySettings: EncodeSettings = {
  * 开关，而不是设置对象上一个自成一体的布尔字段。
  */
 export function hasOverwrite(settings: EncodeSettings): boolean {
-  return settings.cli.y !== undefined;
+  // 同一个选项可以出现多份（`-y` 也不例外），所以这里问的是「有没有」，
+  // 而不是「第一条是谁」。
+  return settings.cli.some((entry) => entry.name === 'y');
 }
 
 export function withOverwrite(settings: EncodeSettings, on: boolean): EncodeSettings {
-  const cli = { ...settings.cli };
+  const cli = settings.cli.filter((entry) => entry.name !== 'y');
   if (on) {
-    cli.y = { value: '', takesValue: false, position: 'global' };
-  } else {
-    delete cli.y;
+    // 全局选项只能落在命令行最前面，所以它排在最前。`-y` 重复出现没有意义，
+    // 上面已经把它清掉，这里只补一份。
+    cli.unshift({ name: 'y', value: '', takesValue: false, position: 'global' });
   }
   return { ...settings, cli };
 }
@@ -132,11 +243,11 @@ function stringOr(raw: unknown, fallback = ''): string {
 }
 
 /** 收拢一组「选项名 -> 值」；非字符串与空值都丢掉。 */
-function normalizeOptions(raw: unknown): Record<string, string> {
+function normalizeOptions(raw: unknown): OptionValues {
   if (!isRecord(raw)) {
     return {};
   }
-  const out: Record<string, string> = {};
+  const out: OptionValues = {};
   for (const [name, value] of Object.entries(raw)) {
     if (typeof value === 'string' && value !== '') {
       out[name] = value;
@@ -149,23 +260,46 @@ function normalizePosition(raw: unknown): CliPosition {
   return raw === 'global' || raw === 'input' || raw === 'output' ? raw : 'output';
 }
 
-function normalizeCli(raw: unknown): Record<string, CliValue> {
-  if (!isRecord(raw)) {
-    return {};
-  }
-  const out: Record<string, CliValue> = {};
-  for (const [name, value] of Object.entries(raw)) {
-    if (!isRecord(value)) {
-      continue;
+/** 从一份（形状未知的）数据里拼出一个选项条目。 */
+function entryFrom(name: string, raw: unknown): CliEntry {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    name,
+    value: stringOr(record.value),
+    takesValue: typeof record.takesValue === 'boolean' ? record.takesValue : true,
+    position: normalizePosition(record.position),
+    spec: typeof record.spec === 'string' && record.spec !== '' ? record.spec : undefined,
+  };
+}
+
+/**
+ * 收拢命令行选项。
+ *
+ * 两种形状都收：现在的数组，以及 v2 预设里的「名字 -> 取值」映射（那时同一个
+ * 选项只能出现一次）。映射按它自己的键序转成数组——那正是它当时显示的顺序。
+ */
+function normalizeEntries(raw: unknown): CliEntry[] {
+  if (Array.isArray(raw)) {
+    const out: CliEntry[] = [];
+    for (const item of raw) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const name = stringOr(item.name);
+      if (name !== '') {
+        out.push(entryFrom(name, item));
+      }
     }
-    out[name] = {
-      value: stringOr(value.value),
-      takesValue: typeof value.takesValue === 'boolean' ? value.takesValue : true,
-      position: normalizePosition(value.position),
-      spec: typeof value.spec === 'string' && value.spec !== '' ? value.spec : undefined,
-    };
+    return out;
   }
-  return out;
+
+  if (isRecord(raw)) {
+    return Object.entries(raw)
+      .filter(([, value]) => isRecord(value))
+      .map(([name, value]) => entryFrom(name, value));
+  }
+
+  return [];
 }
 
 function normalizeStreams(raw: unknown): Record<string, StreamSetting> {
@@ -177,9 +311,35 @@ function normalizeStreams(raw: unknown): Record<string, StreamSetting> {
     if (!isRecord(value)) {
       continue;
     }
-    out[spec] = { codec: stringOr(value.codec), options: normalizeOptions(value.options) };
+    out[spec] = {
+      codec: stringOr(value.codec),
+      options: normalizeOptions(value.options),
+      decoder: stringOr(value.decoder),
+      decoderOptions: normalizeOptions(value.decoderOptions),
+      bitstreamFilter: stringOr(value.bitstreamFilter),
+      bitstreamOptions: normalizeOptions(value.bitstreamOptions),
+      filter: stringOr(value.filter),
+    };
   }
   return out;
+}
+
+function normalizeFormat(raw: unknown): FormatSetting {
+  const record = isRecord(raw) ? raw : {};
+  return { name: stringOr(record.name), options: normalizeOptions(record.options) };
+}
+
+function normalizeProtocol(raw: unknown): ProtocolSetting {
+  const record = isRecord(raw) ? raw : {};
+  return { name: stringOr(record.name), options: normalizeOptions(record.options) };
+}
+
+function normalizeFilterComplex(raw: unknown): FilterComplexSetting {
+  const record = isRecord(raw) ? raw : {};
+  const maps = Array.isArray(record.maps)
+    ? record.maps.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : [];
+  return { graph: stringOr(record.graph), maps };
 }
 
 /**
@@ -195,11 +355,21 @@ export function normalizeSettings(raw: unknown): EncodeSettings {
   const hwDevice = { type: stringOr(hw.type), device: stringOr(hw.device) };
 
   // 旧结构（编码器直接放在顶层，只有视频与音频两类）迁移过来。
-  if (!isRecord(record.cli) && !isRecord(record.streams)) {
+  const hasCli = isRecord(record.cli) || Array.isArray(record.cli);
+  if (!hasCli && !isRecord(record.streams)) {
     return { ...fromLegacy(record), hwDevice };
   }
 
-  return { cli: normalizeCli(record.cli), streams: normalizeStreams(record.streams), hwDevice };
+  return {
+    cli: normalizeEntries(record.cli),
+    streams: normalizeStreams(record.streams),
+    hwDevice,
+    inputFormat: normalizeFormat(record.inputFormat),
+    outputFormat: normalizeFormat(record.outputFormat),
+    inputProtocol: normalizeProtocol(record.inputProtocol),
+    outputProtocol: normalizeProtocol(record.outputProtocol),
+    filterComplex: normalizeFilterComplex(record.filterComplex),
+  };
 }
 
 /**
@@ -219,10 +389,10 @@ function fromLegacy(record: Record<string, unknown>): EncodeSettings {
     const codec = stringOr(record[codecKey]);
     const options = normalizeOptions(record[optionsKey]);
     if (codec !== '' || Object.keys(options).length > 0) {
-      streams[spec] = { codec, options };
+      streams[spec] = { ...emptyStream, codec, options };
     }
   }
-  return { cli: {}, streams, hwDevice: { type: '', device: '' } };
+  return { ...emptySettings, streams };
 }
 
 /* ---------------------------------------------------------------- argv */
@@ -237,7 +407,8 @@ export interface BuildRequest {
   platform?: Platform;
 }
 
-function appendOptions(args: string[], options: Record<string, string>): void {
+/** 追加一组组件私有参数：`-<名> <取值>`。空值不生成半截参数。 */
+function appendOptionValues(args: string[], options: OptionValues): void {
   for (const [name, value] of Object.entries(options)) {
     const trimmed = value.trim();
     if (trimmed !== '') {
@@ -247,14 +418,77 @@ function appendOptions(args: string[], options: Record<string, string>): void {
 }
 
 /**
+ * 组件名 + 它自己的参数组成一段文本：`name=key=value:key2=value2`。
+ *
+ * 滤镜与 bsf 的写法相同（`key=value` 对，多个用 ':' 连），区别只在滤镜链里
+ * 多个滤镜用 ',' 分隔、而每路流只有一个 bsf。没有参数时就只有名字。
+ *
+ * 界面上的滤镜参数助手也用这个函数生成片段，所以「助手预览里看到的」就是
+ * 「命令里生成的」。
+ */
+export function componentParams(name: string, values: OptionValues): string {
+  const params = Object.entries(values)
+    .filter(([, value]) => value.trim() !== '')
+    .map(([key, value]) => `${key}=${value.trim()}`);
+  return params.length === 0 ? name : `${name}=${params.join(':')}`;
+}
+
+/**
+ * bsf 的取值：名字后面直接跟它自己的参数。
+ *
+ * 实测 `-bsf:v h264_metadata=aud=insert:colour_primaries=1` 可用——bsf 的
+ * AVOptions 注册在 AVBSFContext 上，ffmpeg 解析这段文本的方式与滤镜参数一致。
+ */
+function bitstreamValue(stream: StreamSetting): string {
+  return componentParams(stream.bitstreamFilter, stream.bitstreamOptions);
+}
+
+/**
+ * 追加 filter_complex 与它的 -map。
+ *
+ * 图为空时整段都不生成：空的 `-filter_complex ''` 会让 ffmpeg 直接报错，
+ * 而「没配过滤镜」正是一份设置的常态。
+ */
+function appendFilterComplex(args: string[], complex: FilterComplexSetting): void {
+  const graph = complex.graph.trim();
+  if (graph === '') {
+    return;
+  }
+  args.push('-filter_complex', graph);
+  for (const label of complex.maps) {
+    const trimmed = label.trim();
+    if (trimmed !== '') {
+      args.push('-map', trimmed);
+    }
+  }
+}
+
+/** 追加一路流的输出侧设置：编码器 → bsf → 简单滤镜链。 */
+function appendStreamOutput(args: string[], spec: string, stream: StreamSetting): void {
+  if (stream.codec !== '') {
+    args.push(`-c:${spec}`, stream.codec);
+    appendOptionValues(args, stream.options);
+  }
+  if (stream.bitstreamFilter !== '') {
+    args.push(`-bsf:${spec}`, bitstreamValue(stream));
+  }
+  const filter = stream.filter.trim();
+  if (filter !== '') {
+    args.push(`-filter:${spec}`, filter);
+  }
+}
+
+/**
  * 按 ffmpeg 的参数分层拼装：
  *
- *   全局选项 → 硬件设备 → 输入侧选项 → -i 输入 → 每类流的编码设置 →
- *   输出侧选项 → 手写补充参数 → 输出文件
+ *   全局选项 → 硬件设备 → 输入协议参数 → 输入侧选项 → -f 输入格式 →
+ *   每类流的解码器 → -i 输入 → filter_complex 与 -map → 每类流的编码设置
+ *   （编码器 → bsf → 简单滤镜链）→ 输出侧选项 → -f 输出格式 →
+ *   输出协议参数 → 手写补充参数 → 输出文件
  *
  * 这个层次不是一份手写的顺序表，而是「选项属于 ffmpeg 的哪一段」的直接结果：
- * 全局选项必须最先，输入侧选项必须早于它作用的输入，输出侧选项与流设置必须
- * 晚于输入、早于输出文件。
+ * 全局选项必须最先；解码器与输入侧选项必须早于它作用的输入；编码器、bsf、
+ * 滤镜与输出侧选项必须晚于输入、早于输出文件。
  *
  * `-hide_banner` 不在这里生成：服务器执行前会自己补上（见 internal/server 的
  * runJob），免得界面把一个纯日志开关当成转码设置。
@@ -278,18 +512,40 @@ export function buildArgs({
     args.push('-init_hw_device', device === '' ? `${hw.type}=hw` : `${hw.type}=hw:${device}`);
   }
 
+  // 协议参数是注册在 URLContext 上的普通选项（-http_proxy、-timeout…），
+  // 按它作用的方向摆在对应文件之前。
+  appendOptionValues(args, settings.inputProtocol.options);
   appendCli(args, settings.cli, 'input');
-  args.push('-i', input);
+  if (settings.inputFormat.name !== '') {
+    args.push('-f', settings.inputFormat.name);
+  }
+  appendOptionValues(args, settings.inputFormat.options);
 
+  // 解码器必须早于 -i：它作用于这个输入的码流。没指定时整段不生成，
+  // 由 ffmpeg 自己选解码器。
   for (const [spec, stream] of Object.entries(settings.streams)) {
-    if (stream.codec === '') {
+    if (stream.decoder === '') {
       continue;
     }
-    args.push(`-c:${spec}`, stream.codec);
-    appendOptions(args, stream.options);
+    args.push(`-c:${spec}`, stream.decoder);
+    appendOptionValues(args, stream.decoderOptions);
+  }
+
+  args.push('-i', input);
+
+  appendFilterComplex(args, settings.filterComplex);
+
+  for (const [spec, stream] of Object.entries(settings.streams)) {
+    appendStreamOutput(args, spec, stream);
   }
 
   appendCli(args, settings.cli, 'output');
+  if (settings.outputFormat.name !== '') {
+    args.push('-f', settings.outputFormat.name);
+  }
+  appendOptionValues(args, settings.outputFormat.options);
+  appendOptionValues(args, settings.outputProtocol.options);
+
   args.push(...splitArgs(extraArgs, platform));
   args.push(output);
   return args;
@@ -298,24 +554,23 @@ export function buildArgs({
 /**
  * 追加某一层的命令行选项。
  *
- * 按选项名排序后再输出，这样同一份设置永远生成同一个命令——预设才有可复现
- * 的意义，改动 diff 起来也不会因为对象键序而抖动。
+ * 顺序就是数组里的顺序，不另排序：同一个选项重复出现时（连着好几条 `-map`）
+ * 先后本来就有意义，而用户加进来时的顺序正是他要的那个顺序。
  */
-function appendCli(args: string[], cli: Record<string, CliValue>, position: CliPosition): void {
-  const names = Object.keys(cli)
-    .filter((name) => cli[name].position === position)
-    .sort();
-
-  for (const name of names) {
-    const option = cli[name];
+function appendCli(args: string[], cli: CliEntry[], position: CliPosition): void {
+  for (const entry of cli) {
+    if (entry.position !== position) {
+      continue;
+    }
     // ffmpeg 允许这种选项带 `:<stream_spec>`（帮助原文里的 `[:<stream_spec>]`）。
     // 少了它，`-filter loudnorm=…` 会落到视频流上；`-filter:a` 才是本意。
-    const flag = option.spec ? `${name}:${option.spec}` : name;
-    if (option.takesValue) {
-      if (option.value.trim() === '') {
+    const flag = entry.spec ? `${entry.name}:${entry.spec}` : entry.name;
+    if (entry.takesValue) {
+      const value = entry.value.trim();
+      if (value === '') {
         continue; // 需要取值却还空着：不生成半截参数
       }
-      args.push(`-${flag}`, option.value.trim());
+      args.push(`-${flag}`, value);
     } else {
       args.push(`-${flag}`);
     }

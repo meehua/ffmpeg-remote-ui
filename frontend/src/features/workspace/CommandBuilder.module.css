@@ -219,3 +219,30 @@ summary.sectionHead {
   align-items: center;
   gap: var(--gap-sm);
 }
+
+/* 滤镜参数助手生成出来的片段：等宽字体 + 可折行，一眼看清它到底会写进命令里的什么。 */
+.snippet {
+  margin: 0;
+  padding-block: var(--gap-xs);
+  padding-inline: var(--gap-xs);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+/* 同一个选项的多条取值、以及每一条 -map：输入框和它右边那个按钮排成一行。
+   输入框占满剩下的宽度，窄屏时按钮自己折到下一行。 */
+.valueRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.valueRow > :first-child {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
+}

@@ -1,7 +1,7 @@
 import type { MessageKey } from '../../i18n';
 import type { Params } from '../../i18n/types';
 import { isRecord } from '../../utils/format';
-import { normalizeSettings, type EncodeSettings } from '../workspace/args';
+import { normalizeSettings, withOverwrite, type EncodeSettings } from '../workspace/args';
 
 /**
  * 配方的结构版本。
@@ -57,13 +57,12 @@ export function decodeRecipe(raw: unknown): Recipe | undefined {
     return undefined;
   }
 
-  const settings = normalizeSettings(raw.settings);
-
   // v1 的「覆盖输出文件」开关，在 v2 里就是命令行选项 -y（ffmpeg 的
-  // Global options 之一）。位置固定在最前，因为全局选项只能放在那里。
-  if (version < 2 && raw.overwrite === true && settings.cli.y === undefined) {
-    settings.cli.y = { value: '', takesValue: false, position: 'global' };
-  }
+  // Global options 之一）。它由 withOverwrite 生成，与界面上那个开关同一条路。
+  const settings =
+    version < 2 && raw.overwrite === true
+      ? withOverwrite(normalizeSettings(raw.settings), true)
+      : normalizeSettings(raw.settings);
 
   const recipe: Recipe = {
     settings,

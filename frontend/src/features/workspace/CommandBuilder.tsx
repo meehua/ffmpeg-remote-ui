@@ -5,16 +5,14 @@ import type {
   CliHelp,
   CliOption,
   CliSection,
-  FFOption,
+  FFItem,
   FFOptionGroups,
   GpuDevice,
   HWProbe,
-  OptionMedia,
   Snapshot,
 } from '../../api/types';
-import { Button, Field, Select, Switch, TextInput } from '../../components/Controls';
+import { Button, Field, Select, Switch, TextArea, TextInput } from '../../components/Controls';
 import { ErrorNote, Spinner } from '../../components/Display';
-import { ScrollArea } from '../../components/ScrollArea';
 import { useAction, useAsync, useDebounced } from '../../hooks/useAsync';
 import type { MessageKey } from '../../i18n';
 import { useI18n } from '../../i18n/LocaleProvider';
@@ -29,11 +27,17 @@ import {
 } from '../hardware/devices';
 import {
   defaultPosition,
+  emptyStream,
+  type CliEntry,
   type CliPosition,
-  type CliValue,
   type EncodeSettings,
+  type FilterComplexSetting,
+  type FormatSetting,
+  type ProtocolSetting,
   type StreamSetting,
 } from './args';
+import { FilterAssistant } from './FilterAssistant';
+import { OptionSection } from './OptionSection';
 import styles from './CommandBuilder.module.css';
 
 interface CommandBuilderProps {
@@ -44,12 +48,13 @@ interface CommandBuilderProps {
   devices: GpuDevice[];
   settings: EncodeSettings;
   onChange: (next: EncodeSettings) => void;
+  /** 输入/输出地址：协议区从它的 scheme 认出这次用的是什么协议。批处理一次处理多个文件，没有单一地址，所以两者是可选的。 */
+  input?: string;
+  output?: string;
 }
 
-const emptyStream: StreamSetting = { codec: '', options: {} };
-
 /**
- * `ffmpeg -encoders` 表头图例里各媒体类型对应的 flags 首字母。
+ * `ffmpeg -encoders` / `-decoders` 表头图例里各媒体类型对应的 flags 首字母。
  *
  * 这是 ffmpeg 自己的 flag 列写法（"V..... = Video" 之类），不是本程序对
  * 编码器能力的判断。
@@ -133,14 +138,58 @@ function hwNodeLabel(node: HwNodeChoice, t: (key: string) => string): string {
   return parts.filter((part) => part !== '').join(' · ');
 }
 
+/** 按名字合并几组组件，先出现的说话（demuxer 自己的说明比设备表更具体）。 */
+function mergeItems(...groups: FFItem[][]): FFItem[] {
+  const seen = new Set<string>();
+  const out: FFItem[] = [];
+  for (const group of groups) {
+    for (const item of group) {
+      if (seen.has(item.name)) {
+        continue;
+      }
+      seen.add(item.name);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/**
+ * 把一段滤镜片段接到链尾。链非空时用 ffmpeg 的 ',' 分隔（多个滤镜就是一条链）。
+ */
+function appendFilter(chain: string, snippet: string): string {
+  const head = chain.trim().replace(/,$/, '');
+  return head === '' ? snippet : `${head},${snippet}`;
+}
+
+/**
+ * 从地址里读出协议名：`rtmp://…` 的 rtmp、`file:/x` 的 file。
+ *
+ * 只做字符串切割，不判断这个协议能不能用——候选里本来就只列 `ffmpeg -protocols`
+ * 报出来的那些。地址没有 scheme 时（普通路径）返回空串，也就是这个方向不需要
+ * 协议参数。单字母 + 紧跟分隔符的是 Windows 盘符（C:\…），不是协议。
+ */
+function schemeOf(address: string | undefined): string {
+  const match = /^\s*([A-Za-z][A-Za-z0-9+.-]*):/.exec(address ?? '');
+  if (!match) {
+    return '';
+  }
+  const rest = (address ?? '').slice(match[0].length);
+  if (match[1].length === 1 && (rest.startsWith('\\') || rest.startsWith('/'))) {
+    return '';
+  }
+  return match[1].toLowerCase();
+}
+
 /**
  * 由服务器真实能力驱动的参数构建器。
  *
  * 这里的结构不是设计出来的，是**读出来的**：
  *
  *   - 有哪几路流 → ffmpeg 的 Video/Audio/Subtitle/Data options 分节；
- *   - 每路流可选哪些编码器 → `ffmpeg -encoders` 的 flags 列；
- *   - 每个编码器的可调参数 → `ffmpeg -h encoder=<名>`；
+ *   - 每路流可选哪些编码器/解码器 → `ffmpeg -encoders` / `-decoders` 的 flags 列；
+ *   - 每个组件的可调参数 → `ffmpeg -h <target>=<名>`（编码器、解码器、滤镜、bsf、
+ *     muxer、demuxer、协议各查各的）；
  *   - 命令行有哪些选项、哪个要取值、属于哪一段 → `ffmpeg -h` 的分节与占位符。
  *
  * 硬件设备是唯一保留结构化的特例：它的值由「类型 + 节点」拼成，类型来自
@@ -155,6 +204,8 @@ export function CommandBuilder({
   devices,
   settings,
   onChange,
+  input,
+  output,
 }: CommandBuilderProps) {
   const { t } = useI18n();
   const streamKinds = useMemo(() => streamKindsOf(cliHelp), [cliHelp]);
@@ -304,6 +355,50 @@ export function CommandBuilder({
         />
       ))}
 
+      {/* 输入侧的格式：`-f <demuxer>`。设备也在这一列——FFmpeg 把 v4l2、alsa
+          这类设备实现成 demuxer/muxer，所以它们的参数就是 `-h demuxer=<名>`。 */}
+      <FormatSection
+        title={t('builder.format.input.title')}
+        hint={t('builder.format.input.hint')}
+        target="demuxer"
+        candidates={mergeItems(snapshot.demuxers, snapshot.devices)}
+        setting={settings.inputFormat}
+        onChange={(inputFormat) => onChange({ ...settings, inputFormat })}
+      />
+
+      <FormatSection
+        title={t('builder.format.output.title')}
+        hint={t('builder.format.output.hint')}
+        target="muxer"
+        candidates={snapshot.muxers}
+        setting={settings.outputFormat}
+        onChange={(outputFormat) => onChange({ ...settings, outputFormat })}
+      />
+
+      {/* 协议参数。协议名从地址的 scheme 认出来（也可以在选单里改），参数本身是
+          注册在 URLContext 上的普通选项（-http_proxy、-timeout…）。 */}
+      <ProtocolSection
+        title={t('builder.protocol.input.title')}
+        address={input}
+        protocols={snapshot.protocols}
+        setting={settings.inputProtocol}
+        onChange={(inputProtocol) => onChange({ ...settings, inputProtocol })}
+      />
+
+      <ProtocolSection
+        title={t('builder.protocol.output.title')}
+        address={output}
+        protocols={snapshot.protocols}
+        setting={settings.outputProtocol}
+        onChange={(outputProtocol) => onChange({ ...settings, outputProtocol })}
+      />
+
+      <FilterComplexEditor
+        snapshot={snapshot}
+        setting={settings.filterComplex}
+        onChange={(filterComplex) => onChange({ ...settings, filterComplex })}
+      />
+
       <CliOptions
         cliHelp={cliHelp}
         cli={settings.cli}
@@ -324,13 +419,24 @@ interface StreamEditorProps {
   onChange: (next: StreamSetting) => void;
 }
 
-/** 一路流的编码器与它的参数。 */
+/**
+ * 一路流的编解码设置。
+ *
+ * 五块内容对应 ffmpeg 命令行上五个不同的位置，所以它们的顺序也是命令行的顺序：
+ * 解码器（早于 -i）→ 编码器 → bsf → 简单滤镜链（都在输出侧）。
+ */
 function StreamEditor({ kind, snapshot, codecGroups, stream, onChange }: StreamEditorProps) {
   const { t } = useI18n();
   const flag = MEDIA_FLAG[kind.media] ?? '';
+  // 编码器与解码器都按 ffmpeg 自己报的 flags 列筛：有哪几路流就有几次筛选，
+  // 程序不维护任何组件清单。
   const encoders = useMemo(
     () => snapshot.encoders.filter((item) => flag !== '' && item.flags?.startsWith(flag)),
     [snapshot.encoders, flag],
+  );
+  const decoders = useMemo(
+    () => snapshot.decoders.filter((item) => flag !== '' && item.flags?.startsWith(flag)),
+    [snapshot.decoders, flag],
   );
   const media = MEDIA_KEY[kind.media] ? t(MEDIA_KEY[kind.media]) : kind.media;
 
@@ -339,7 +445,7 @@ function StreamEditor({ kind, snapshot, codecGroups, stream, onChange }: StreamE
       <Field label={t('builder.stream.encoder', { media })} hint={t('builder.stream.encoder.hint')}>
         <Select
           value={stream.codec}
-          onChange={(event) => onChange({ codec: event.target.value, options: {} })}
+          onChange={(event) => onChange({ ...stream, codec: event.target.value, options: {} })}
         >
           <option value="">{t('builder.stream.codec.unset')}</option>
           <option value="copy">{t('builder.stream.codec.copy')}</option>
@@ -364,11 +470,306 @@ function StreamEditor({ kind, snapshot, codecGroups, stream, onChange }: StreamE
           name={stream.codec}
           media={kind.media}
           codecGroups={codecGroups}
+          ownTitle={t('builder.options.own.title')}
+          ownHint={t('builder.options.own.hint', { codec: stream.codec })}
           values={stream.options}
           onChange={(options) => onChange({ ...stream, options })}
         />
       ) : null}
+
+      {/* 解码器必须早于 -i，所以它单独一块，且与编码器分开存。 */}
+      <Field label={t('builder.stream.decoder', { media })} hint={t('builder.stream.decoder.hint')}>
+        <Select
+          value={stream.decoder}
+          onChange={(event) => onChange({ ...stream, decoder: event.target.value, decoderOptions: {} })}
+        >
+          <option value="">{t('builder.stream.decoder.unset')}</option>
+          {decoders.map((item) => (
+            <option key={item.name} value={item.name}>
+              {item.name} · {item.description ?? ''}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {stream.decoder !== '' ? (
+        <OptionSection
+          label={t('builder.stream.decoder.options', { decoder: stream.decoder })}
+          target="decoder"
+          name={stream.decoder}
+          ownTitle={t('builder.options.component.own.title')}
+          ownHint={t('builder.options.component.own.hint', { name: stream.decoder })}
+          values={stream.decoderOptions}
+          onChange={(decoderOptions) => onChange({ ...stream, decoderOptions })}
+        />
+      ) : null}
+
+      {/* 简单滤镜链：`-filter:<spec>` 的原文。它处理的是这一路流解码之后的帧。 */}
+      <Field label={t('builder.stream.filter', { media })} hint={t('builder.stream.filter.hint')}>
+        <TextArea
+          rows={2}
+          spellCheck={false}
+          value={stream.filter}
+          placeholder={t('builder.stream.filter.placeholder')}
+          onChange={(event) => onChange({ ...stream, filter: event.target.value })}
+        />
+      </Field>
+
+      <FilterAssistant
+        filters={snapshot.filters}
+        onInsert={(snippet) => onChange({ ...stream, filter: appendFilter(stream.filter, snippet) })}
+      />
+
+      {/* bitstream filter：处理还没解开的码流，落在编码之后、进容器之前。 */}
+      <Field label={t('builder.stream.bsf', { media })} hint={t('builder.stream.bsf.hint')}>
+        <Select
+          value={stream.bitstreamFilter}
+          onChange={(event) =>
+            onChange({ ...stream, bitstreamFilter: event.target.value, bitstreamOptions: {} })
+          }
+        >
+          <option value="">{t('builder.stream.bsf.unset')}</option>
+          {snapshot.bitstreamFilters.map((item) => (
+            <option key={item.name} value={item.name}>
+              {item.name} · {item.description ?? ''}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {stream.bitstreamFilter !== '' ? (
+        <OptionSection
+          label={t('builder.stream.bsf.options', { bsf: stream.bitstreamFilter })}
+          target="bsf"
+          name={stream.bitstreamFilter}
+          ownTitle={t('builder.options.component.own.title')}
+          ownHint={t('builder.options.component.own.hint', { name: stream.bitstreamFilter })}
+          values={stream.bitstreamOptions}
+          onChange={(bitstreamOptions) => onChange({ ...stream, bitstreamOptions })}
+        />
+      ) : null}
     </>
+  );
+}
+
+/* ---------------------------------------------------------------- 格式与协议 */
+
+interface FormatSectionProps {
+  title: string;
+  hint: string;
+  /** 参数来源的 target：demuxer / muxer。 */
+  target: string;
+  /** 候选组件：来自 `-demuxers` / `-muxers`（输入侧还并上 `-devices`）。 */
+  candidates: FFItem[];
+  setting: FormatSetting;
+  onChange: (next: FormatSetting) => void;
+}
+
+/**
+ * 一处 `-f` 设置：用哪个容器（或设备），以及它自己的参数。
+ *
+ * 名字与参数都来自 FFmpeg：`-movflags +faststart`、`-video_size 640x480` 这些
+ * 就是 muxer/demuxer 注册在 AVFormatContext 上的 AVOption。留空表示不生成 `-f`，
+ * 由 ffmpeg 按文件名推断。
+ */
+function FormatSection({
+  title,
+  hint,
+  target,
+  candidates,
+  setting,
+  onChange,
+}: FormatSectionProps) {
+  const { t } = useI18n();
+
+  return (
+    <section className={styles.section}>
+      <header className={styles.sectionHead}>
+        <span className={styles.sectionTitle}>{title}</span>
+        <span className={styles.sectionMeta}>{hint}</span>
+      </header>
+
+      <Select
+        value={setting.name}
+        aria-label={title}
+        onChange={(event) => onChange({ name: event.target.value, options: {} })}
+      >
+        <option value="">{t('builder.format.none')}</option>
+        {candidates.map((item) => (
+          <option key={item.name} value={item.name}>
+            {item.name} · {item.description ?? ''}
+          </option>
+        ))}
+      </Select>
+
+      {candidates.length === 0 ? (
+        <p className={styles.sectionMeta}>{t('builder.format.empty')}</p>
+      ) : null}
+
+      {setting.name !== '' ? (
+        <OptionSection
+          label={t('builder.options.component.title', { name: setting.name })}
+          target={target}
+          name={setting.name}
+          ownTitle={t('builder.options.component.own.title')}
+          ownHint={t('builder.options.component.own.hint', { name: setting.name })}
+          values={setting.options}
+          onChange={(options) => onChange({ ...setting, options })}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+interface ProtocolSectionProps {
+  title: string;
+  /** 这一侧的地址；没有（批处理）时协议只能手选。 */
+  address?: string;
+  /** 全部协议，来自 `ffmpeg -protocols`。 */
+  protocols: FFItem[];
+  setting: ProtocolSetting;
+  onChange: (next: ProtocolSetting) => void;
+}
+
+/**
+ * 一处协议参数。
+ *
+ * 协议从地址的 scheme 认出来（`rtmp://…` → rtmp），也可以在选单里改；拿不准的
+ * 话空着就行。参数取自 `ffmpeg -h protocol=<名>`，例如 http 的 `-http_proxy`：
+ * 它们和 muxer 的参数一样，是注册在 URLContext 上的普通命令行选项。
+ */
+function ProtocolSection({ title, address, protocols, setting, onChange }: ProtocolSectionProps) {
+  const { t } = useI18n();
+  const detected = schemeOf(address);
+  // 选单里没挑时就用地址里认出来的那个：这正是「按地址自动」的含义。
+  const active = setting.name !== '' ? setting.name : detected;
+  // 有的协议不在 `-protocols` 里（例如 file 只出现在输入侧的那一段），
+  // 认出来了就补进候选，免得选单里显示不出当前用的到底是什么。
+  const known = protocols.some((item) => item.name === detected);
+
+  return (
+    <section className={styles.section}>
+      <header className={styles.sectionHead}>
+        <span className={styles.sectionTitle}>{title}</span>
+        <span className={styles.sectionMeta}>{t('builder.protocol.hint')}</span>
+      </header>
+
+      <Select
+        value={setting.name}
+        aria-label={title}
+        onChange={(event) => onChange({ name: event.target.value, options: {} })}
+      >
+        <option value="">
+          {detected === '' ? t('builder.protocol.none') : t('builder.protocol.auto', { scheme: detected })}
+        </option>
+        {known || detected === '' ? null : <option value={detected}>{detected}</option>}
+        {protocols.map((item) => (
+          <option key={item.name} value={item.name}>
+            {item.name} · {item.description ?? ''}
+          </option>
+        ))}
+      </Select>
+
+      {active !== '' ? (
+        <OptionSection
+          label={t('builder.options.component.title', { name: active })}
+          target="protocol"
+          name={active}
+          ownTitle={t('builder.options.component.own.title')}
+          ownHint={t('builder.options.component.own.hint', { name: active })}
+          values={setting.options}
+          onChange={(options) => onChange({ ...setting, options })}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- 滤镜图 */
+
+interface FilterComplexEditorProps {
+  snapshot: Snapshot;
+  setting: FilterComplexSetting;
+  onChange: (next: FilterComplexSetting) => void;
+}
+
+/**
+ * `-filter_complex`：一条可以多进多出的滤镜图，以及把它的输出接到输出文件上的
+ * `-map`。
+ *
+ * 与每路流的简单滤镜链分工不同：`-filter:v` 只能一路进一路出，图可以拆分、并联、
+ * 合并多路流（画中画、混音都在这一档）。图本身是自由文本——它的语法是可嵌套的，
+ * 表单表达不了；参数仍然可以借上面的滤镜参数助手生成。
+ */
+function FilterComplexEditor({ snapshot, setting, onChange }: FilterComplexEditorProps) {
+  const { t } = useI18n();
+  const maps = setting.maps;
+
+  const setMap = (index: number, value: string) =>
+    onChange({ ...setting, maps: maps.map((item, i) => (i === index ? value : item)) });
+  const addMap = () => onChange({ ...setting, maps: [...maps, ''] });
+  const removeMap = (index: number) =>
+    onChange({ ...setting, maps: maps.filter((_, i) => i !== index) });
+
+  return (
+    <details className={styles.section} open={setting.graph.trim() !== ''}>
+      <summary className={styles.sectionHead}>
+        <span className={styles.sectionTitle}>{t('builder.filterComplex.title')}</span>
+        <span className={styles.sectionMeta}>
+          {t('builder.filterComplex.summary', { count: maps.length })}
+        </span>
+      </summary>
+
+      <p className={styles.sectionMeta}>{t('builder.filterComplex.hint')}</p>
+
+      <Field label={t('builder.filterComplex.graph')}>
+        <TextArea
+          rows={3}
+          spellCheck={false}
+          value={setting.graph}
+          placeholder="[0:v]scale=1280:-1[outv]"
+          onChange={(event) => onChange({ ...setting, graph: event.target.value })}
+        />
+      </Field>
+
+      <FilterAssistant
+        filters={snapshot.filters}
+        onInsert={(snippet) => onChange({ ...setting, graph: appendFilter(setting.graph, snippet) })}
+      />
+
+      {/* -map 的取值是自由文本（`[outv]`、`0:a`、`1:v:0`…），顺序有意义，
+          所以这里不排序、也不去重。 */}
+      <p className={styles.optionGroupHead}>
+        <span className={styles.optionGroupTitle}>{t('builder.filterComplex.maps')}</span>
+        <span className={styles.sectionMeta}>{t('builder.filterComplex.maps.hint')}</span>
+      </p>
+
+      <ul className={styles.options}>
+        {maps.map((map, index) => (
+          // 列表只增删、不重排，所以下标当 key 是稳的。
+          // eslint-disable-next-line react/no-array-index-key
+          <li key={index}>
+            <div className={styles.valueRow}>
+              <TextInput
+                value={map}
+                placeholder={t('builder.filterComplex.map.placeholder')}
+                aria-label={t('builder.filterComplex.maps')}
+                onChange={(event) => setMap(index, event.target.value)}
+              />
+              <Button compact variant="ghost" onClick={() => removeMap(index)}>
+                {t('builder.filterComplex.map.remove')}
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className={styles.probe}>
+        <Button compact onClick={addMap}>
+          {t('builder.filterComplex.map.add')}
+        </Button>
+      </div>
+    </details>
   );
 }
 
@@ -376,8 +777,8 @@ function StreamEditor({ kind, snapshot, codecGroups, stream, onChange }: StreamE
 
 interface CliOptionsProps {
   cliHelp: CliHelp | null;
-  cli: Record<string, CliValue>;
-  onChange: (next: Record<string, CliValue>) => void;
+  cli: CliEntry[];
+  onChange: (next: CliEntry[]) => void;
 }
 
 /**
@@ -387,6 +788,10 @@ interface CliOptionsProps {
  * 摆成控件，并记下每个选项该插在命令行的哪一段。以前这些最常用的选项
  * （`-ss`、`-t`、`-f`、`-metadata`、`-c`、`-filter`…）根本进不了程序，只能靠
  * 「附加参数」手写；现在它们是这里的一行。
+ *
+ * 一个选项可以出现多份：`-map`、`-metadata`、`-attach` 这些都是要重复写的，
+ * 所以存的是有序列表而不是「名字 -> 取值」。哪些选项能重复，程序不预判——
+ * 想在哪个选项上再加一条，就点哪个选项的「再添一条」。
  */
 function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
   const { t } = useI18n();
@@ -398,19 +803,37 @@ function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
   // 这里就有几个可选值，程序不自己列一份 v/a/s/d。
   const specs = useMemo(() => streamKindsOf(cliHelp), [cliHelp]);
   const enabled = useMemo(
-    () => Object.values(cli).filter((item) => !item.takesValue || item.value.trim() !== '').length,
+    () => cli.filter((item) => !item.takesValue || item.value.trim() !== '').length,
     [cli],
   );
 
-  const setValue = (name: string, next: CliValue | null) => {
-    const copy = { ...cli };
-    if (next === null) {
-      delete copy[name];
-    } else {
-      copy[name] = next;
+  /**
+   * 换掉某个选项名的全部条目。
+   *
+   * 同名条目在命令里只由一个位置决定（它们分别生成一条选项），所以整体替换时
+   * 落在第一条原本的位置上，其余选项的相对顺序不受影响。
+   */
+  const setEntries = (name: string, entries: CliEntry[]) => {
+    const next: CliEntry[] = [];
+    let inserted = false;
+    for (const entry of cli) {
+      if (entry.name !== name) {
+        next.push(entry);
+        continue;
+      }
+      if (!inserted) {
+        next.push(...entries);
+        inserted = true;
+      }
     }
-    onChange(copy);
+    if (!inserted) {
+      next.push(...entries);
+    }
+    onChange(next);
   };
+
+  /** 某个选项名当前的条目；没有就是空数组。 */
+  const entriesOf = (name: string) => cli.filter((entry) => entry.name === name);
 
   if (!cliHelp) {
     return (
@@ -462,8 +885,8 @@ function CliOptions({ cliHelp, cli, onChange }: CliOptionsProps) {
                   option={option}
                   section={section}
                   specs={specs}
-                  value={cli[option.name]}
-                  onChange={(next) => setValue(option.name, next)}
+                  entries={entriesOf(option.name)}
+                  onChange={(next) => setEntries(option.name, next)}
                 />
               </li>
             ))}
@@ -499,9 +922,9 @@ interface CliOptionRowProps {
   section: CliSection;
   /** 可用的流定位符，来自 ffmpeg 的媒体类型分节。 */
   specs: StreamKindInfo[];
-  /** 缺省表示这个选项还没启用。 */
-  value: CliValue | undefined;
-  onChange: (next: CliValue | null) => void;
+  /** 这个选项名当前的全部条目；空数组表示它还没启用。 */
+  entries: CliEntry[];
+  onChange: (next: CliEntry[]) => void;
 }
 
 /**
@@ -510,29 +933,53 @@ interface CliOptionRowProps {
  * 控件形态直接由 ffmpeg 决定：给了 `<占位符>` 就是要取值（文本框），没有的就是
  * 开关（勾选框）。两个可改的小选择器都只在 ffmpeg 自己说不清楚时出现：
  *
- *   - 位置：它把 `-hwaccel` 归在 "Advanced Video options" 下，可放进输出侧时
+ *   - 位置：它把 `-hwaccel` 归在 "Advanced video options" 下，可放进输出侧时
  *     ffmpeg 会报 "you are trying to apply an input option to an output file"；
  *   - 流定位符：`-filter` 不带 `:a` 会落到视频流上，`-filter:a` 才只处理音频。
  *
  * 两者都是 ffmpeg 的语法本身，程序只负责把选择权交出来。
+ *
+ * 要取值的选项可以出现多份（同一个名字连着写好几条），每条各自一个输入框；
+ * 「再添一条」不判断这个选项该不该重复——ffmpeg 会接受，或者由用户自己看着办。
  */
-function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowProps) {
+function CliOptionRow({ option, section, specs, entries, onChange }: CliOptionRowProps) {
   const { t } = useI18n();
-  const enabled = value !== undefined;
+  const enabled = entries.length > 0;
   const takesValue = option.takesValue === true;
-  const position = value?.position ?? defaultPosition(section.scope);
-  const spec = value?.spec ?? '';
+  const first = entries[0];
+  const position = first?.position ?? defaultPosition(section.scope);
+  const spec = first?.spec ?? '';
   const showPosition =
     enabled && (section.scope === 'stream' || section.scope === 'both' || section.scope === 'other');
 
-  /** 用当前已选的位置与流定位符拼一份新取值。 */
-  const patch = (next: Partial<CliValue>): CliValue => ({
-    value: value?.value ?? '',
+  /** 一层新的空白条目；名字、位置、流定位符都沿用它自己当前的样子。 */
+  const blank = (value: string): CliEntry => ({
+    name: option.name,
+    value,
     takesValue,
     position,
     ...(spec === '' ? {} : { spec }),
-    ...next,
   });
+
+  const patchAll = (next: Partial<CliEntry>) =>
+    onChange(entries.map((entry) => ({ ...entry, ...next })));
+
+  const setValueAt = (index: number, value: string) => {
+    if (entries.length === 0) {
+      if (value !== '') {
+        onChange([blank(value)]);
+      }
+      return;
+    }
+    // 需要取值却清空了：这一条就不该再生成，直接去掉（只有一条时整项也取消）。
+    if (value === '' && entries.length === 1) {
+      onChange([]);
+      return;
+    }
+    onChange(entries.map((entry, i) => (i === index ? { ...entry, value } : entry)));
+  };
+
+  const removeAt = (index: number) => onChange(entries.filter((_, i) => i !== index));
 
   return (
     <div className={cx(styles.row, enabled && styles.rowSet)}>
@@ -547,9 +994,7 @@ function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowP
             value={spec}
             aria-label={t('builder.cli.spec.aria', { name: option.name })}
             onChange={(event) =>
-              onChange(
-                patch({ spec: event.target.value === '' ? undefined : event.target.value }),
-              )
+              patchAll({ spec: event.target.value === '' ? undefined : event.target.value })
             }
           >
             <option value="">{t('builder.cli.spec.all')}</option>
@@ -565,7 +1010,7 @@ function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowP
             className={styles.position}
             value={position}
             aria-label={t('builder.cli.position.aria', { name: option.name })}
-            onChange={(event) => onChange(patch({ position: event.target.value as CliPosition }))}
+            onChange={(event) => patchAll({ position: event.target.value as CliPosition })}
           >
             <option value="input">{t('builder.cli.position.input')}</option>
             <option value="output">{t('builder.cli.position.output')}</option>
@@ -577,343 +1022,41 @@ function CliOptionRow({ option, section, specs, value, onChange }: CliOptionRowP
         <>
           {/* 说明文字来自 ffmpeg -h，是它自己的英文原文。 */}
           {option.description ? <p className={styles.desc}>{option.description}</p> : null}
-          <TextInput
-            value={value?.value ?? ''}
-            placeholder={option.placeholder ?? ''}
-            aria-label={`-${option.name}`}
-            onChange={(event) => {
-              const text = event.target.value;
-              onChange(text === '' ? null : patch({ value: text }));
-            }}
-          />
+
+          {/* 还没启用时也要有一个输入框：它是这个选项的唯一入口。 */}
+          {(entries.length === 0 ? [null] : entries).map((entry, index) => (
+            // 列表只增删、不重排，所以下标当 key 是稳的。
+            // eslint-disable-next-line react/no-array-index-key
+            <div className={styles.valueRow} key={index}>
+              <TextInput
+                value={entry?.value ?? ''}
+                placeholder={option.placeholder ?? ''}
+                aria-label={`-${option.name}`}
+                onChange={(event) => setValueAt(index, event.target.value)}
+              />
+              {entries.length > 1 ? (
+                <Button compact variant="ghost" onClick={() => removeAt(index)}>
+                  {t('builder.cli.removeValue')}
+                </Button>
+              ) : null}
+            </div>
+          ))}
+
+          {enabled ? (
+            <div className={styles.probe}>
+              <Button compact onClick={() => onChange([...entries, blank('')])}>
+                {t('builder.cli.addValue')}
+              </Button>
+            </div>
+          ) : null}
         </>
       ) : (
         <Switch
           label={option.description || `-${option.name}`}
           checked={enabled}
-          onChange={(on) => onChange(on ? patch({ value: '' }) : null)}
+          onChange={(on) => onChange(on ? [blank('')] : [])}
         />
       )}
     </div>
-  );
-}
-
-/* ---------------------------------------------------------------- 参数区 */
-
-interface OptionSectionProps {
-  label: string;
-  target: string;
-  name: string;
-  /** 这类流的媒体类型，用来筛公共上下文层里的适用项。 */
-  media: string;
-  /** ffmpeg 的公共上下文选项（`-h full` 的 codec 层）。 */
-  codecGroups: FFOptionGroups | null;
-  values: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
-}
-
-/**
- * 一个组件的参数区。
- *
- * 参数来自两处**不同**的来源，所以分成两组摆，而不是并成一张表：
- *
- *   - 编码器自己注册的那层（`ffmpeg -h encoder=<名>`）：crf、preset、low_power…
- *   - ffmpeg 的公共上下文层（`ffmpeg -h full` 的 AVCodecContext）：global_quality、
- *     b、maxrate、profile… 它们对每个编码器都成立，因此不在上面那份输出里。
- *
- * 两层合起来才是「这个编码器真正能用的参数」。并成一张表就等于把「这属于谁」
- * 又丢了——同一个名字在两层里的说明与默认值未必相同。
- */
-function OptionSection({
-  label,
-  target,
-  name,
-  media,
-  codecGroups,
-  values,
-  onChange,
-}: OptionSectionProps) {
-  const { t } = useI18n();
-  const [search, setSearch] = useState('');
-  const query = useDebounced(search, 150).trim().toLowerCase();
-  const help = useAsync(() => api.help(target, name), [target, name]);
-
-  const own = help.data?.help?.options ?? [];
-  const common = useMemo(() => commonCodecOptions(codecGroups, media), [codecGroups, media]);
-
-  // 两层里同名的选项只算一次，且算在编码器私有层上：它更具体，说明与默认值
-  // 都贴着这个编码器。去掉重名之后，公共层这一组就只剩这个编码器真正独有
-  // 不到的那些通用参数（global_quality、b、maxrate…）。
-  //
-  // 渲染顺序是宽 → 窄：先「所有编码器共享的」，再「这个编码器自己的」。
-  const ownNames = useMemo(() => new Set(own.map((option) => option.name)), [own]);
-  const shared = useMemo(
-    () => common.options.filter((option) => !ownNames.has(option.name)),
-    [common, ownNames],
-  );
-
-  const matches = (option: FFOption) =>
-    query === '' ||
-    option.name.toLowerCase().includes(query) ||
-    (option.description ?? '').toLowerCase().includes(query);
-  const ownShown = own.filter(matches);
-  const sharedShown = shared.filter(matches);
-
-  const assigned = Object.entries(values).filter(([, value]) => value.trim() !== '');
-
-  const setValue = (optionName: string, value: string) => {
-    const next = { ...values };
-    if (value === '') {
-      delete next[optionName];
-    } else {
-      next[optionName] = value;
-    }
-    onChange(next);
-  };
-
-  return (
-    <section className={styles.section}>
-      <header className={styles.sectionHead}>
-        <h3 className={styles.sectionTitle}>{label}</h3>
-        <span className={styles.sectionMeta}>
-          {help.loading
-            ? t('common.reading')
-            : t('builder.options.count', { count: own.length + shared.length })}
-        </span>
-      </header>
-
-      {help.error ? <ErrorNote>{help.error}</ErrorNote> : null}
-      {/* ffmpeg 自己的抱怨照原样展示。 */}
-      {help.data?.error ? <ErrorNote>{help.data.error}</ErrorNote> : null}
-      {help.loading ? <Spinner label={t('catalog.help.loading')} /> : null}
-
-      {assigned.length > 0 ? (
-        <ul className={styles.chips}>
-          {assigned.map(([optionName, value]) => (
-            <li key={optionName}>
-              <button
-                type="button"
-                className={styles.chip}
-                title={t('builder.options.chip.clear')}
-                onClick={() => setValue(optionName, '')}
-              >
-                <span className={styles.chipKey}>{optionName}</span>
-                <span className={styles.chipValue}>{value}</span>
-                <span aria-hidden="true">×</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <TextInput
-        type="search"
-        value={search}
-        placeholder={t('builder.options.search')}
-        aria-label={t('builder.options.search.aria', { label })}
-        onChange={(event) => setSearch(event.target.value)}
-      />
-
-      {!help.loading && ownShown.length === 0 && sharedShown.length === 0 ? (
-        <p className={styles.sectionMeta}>{t('builder.options.noMatch')}</p>
-      ) : null}
-
-      {sharedShown.length > 0 ? (
-        <OptionList
-          title={t('builder.options.shared.title')}
-          hint={t('builder.options.shared.hint', { component: common.component })}
-          options={sharedShown}
-          values={values}
-          onChange={setValue}
-        />
-      ) : null}
-
-      {ownShown.length > 0 ? (
-        <OptionList
-          title={t('builder.options.own.title')}
-          hint={t('builder.options.own.hint', { codec: name })}
-          options={ownShown}
-          values={values}
-          onChange={setValue}
-        />
-      ) : null}
-    </section>
-  );
-}
-
-/**
- * 从公共上下文层里挑出适用于这类流的编码选项。
- *
- * 两个判据都来自 FFmpeg 写在选项上的 flags，不是这里另立的规则：
- *
- *   - scope：只留编码侧可用的（encoding / shared）；解码专用的与编码无关。
- *   - media：留「没限定媒体」的，以及限定里含这类流的。空表示 FFmpeg 没有
- *     限定——那是「不知道」，不是「不适用」，所以保留而不是丢掉。
- */
-function commonCodecOptions(
-  groups: FFOptionGroups | null,
-  media: string,
-): { component: string; options: FFOption[] } {
-  if (!groups) {
-    return { component: '', options: [] };
-  }
-  const out: FFOption[] = [];
-  let component = '';
-  for (const group of groups.groups) {
-    if (group.component !== 'codec') {
-      continue;
-    }
-    if (component === '') {
-      component = group.name;
-    }
-    for (const option of group.options) {
-      if (option.scope !== undefined && option.scope !== 'encoding' && option.scope !== 'shared') {
-        continue;
-      }
-      const medias = option.media ?? [];
-      if (medias.length > 0 && !medias.includes(media as OptionMedia)) {
-        continue;
-      }
-      out.push(option);
-    }
-  }
-  return { component, options: out };
-}
-
-interface OptionListProps {
-  title: string;
-  hint: string;
-  options: FFOption[];
-  values: Record<string, string>;
-  onChange: (optionName: string, value: string) => void;
-}
-
-/**
- * 一组参数的列表。
- *
- * 限高之后交给它自己滚：一个编码器动辄上百项，宽屏时不再把这一栏撑到几千像素；
- * 窄屏不受影响，照旧跟着文档流走。上限取 min(50vh, 24rem)：屏幕矮时按视口走，
- * 屏幕高时不超过 24rem，免得一个参数列表就把这一栏里后面的大块挤出视线。
- */
-function OptionList({ title, hint, options, values, onChange }: OptionListProps) {
-  return (
-    <div className={styles.optionGroup}>
-      <p className={styles.optionGroupHead}>
-        <span className={styles.optionGroupTitle}>{title}</span>
-        <span className={styles.sectionMeta}>{hint}</span>
-      </p>
-      <ScrollArea label={title} maxBlockSize="min(50vh, 24rem)">
-        <ul className={styles.options}>
-          {options.map((option) => (
-            <li key={option.name}>
-              <OptionRow
-                option={option}
-                value={values[option.name] ?? ''}
-                onChange={(value) => onChange(option.name, value)}
-              />
-            </li>
-          ))}
-        </ul>
-      </ScrollArea>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- 单个参数 */
-
-interface OptionRowProps {
-  option: FFOption;
-  value: string;
-  onChange: (value: string) => void;
-}
-
-function OptionRow({ option, value, onChange }: OptionRowProps) {
-  const { t } = useI18n();
-  const id = `opt-${option.name}`;
-  const set = value !== '';
-
-  return (
-    <div className={cx(styles.row, set && styles.rowSet)}>
-      <div className={styles.rowHead}>
-        <label className={styles.flag} htmlFor={id}>
-          -{option.name}
-        </label>
-        {option.type ? <span className={styles.type}>{option.type}</span> : null}
-        {option.runtime ? <span className={styles.tag}>{t('common.runtime')}</span> : null}
-      </div>
-
-      {/* 说明文字来自 ffmpeg -h，是它自己的英文原文。 */}
-      {option.description ? <p className={styles.desc}>{option.description}</p> : null}
-
-      <OptionControl id={id} option={option} value={value} onChange={onChange} />
-
-      {option.hasDefault || option.range ? (
-        <p className={styles.facts}>
-          {option.hasDefault ? (
-            <span>{t('option.default', { value: option.default || t('common.empty') })}</span>
-          ) : null}
-          {option.range ? <span>{t('option.range', { value: option.range })}</span> : null}
-          {option.unit ? <span>{t('option.unit', { value: option.unit })}</span> : null}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-/** 按 FFmpeg 给出的类型选择控件：有枚举就下拉，数值就数字框，其余是文本框。 */
-function OptionControl({
-  id,
-  option,
-  value,
-  onChange,
-}: {
-  id: string;
-  option: FFOption;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useI18n();
-  const values = option.values ?? [];
-
-  if (values.length > 0) {
-    return (
-      <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{t('option.useDefault')}</option>
-        {values.map((item) => (
-          <option key={`${item.name}-${item.value ?? ''}`} value={item.value ?? item.name}>
-            {item.name}
-            {item.value ? ` = ${item.value}` : ''}
-            {item.description ? ` · ${item.description}` : ''}
-          </option>
-        ))}
-      </Select>
-    );
-  }
-
-  if (option.type === 'boolean') {
-    return (
-      <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{t('option.useDefault')}</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-      </Select>
-    );
-  }
-
-  const numeric = option.type === 'int' || option.type === 'int64' || option.type === 'uint64' || option.type === 'float' || option.type === 'double';
-  const min = Number.isFinite(Number(option.min)) ? Number(option.min) : undefined;
-  const max = Number.isFinite(Number(option.max)) ? Number(option.max) : undefined;
-
-  return (
-    <TextInput
-      id={id}
-      type={numeric ? 'number' : 'text'}
-      step={option.type === 'float' || option.type === 'double' ? 'any' : undefined}
-      min={min}
-      max={max}
-      value={value}
-      placeholder={option.hasDefault ? String(option.default ?? '') : ''}
-      onChange={(event) => onChange(event.target.value)}
-    />
   );
 }

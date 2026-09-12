@@ -206,6 +206,8 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
             snapshot={snapshot}
             cliHelp={cliHelp}
             devices={hardware?.devices ?? []}
+            input={input}
+            output={output}
             settings={settings}
             onChange={setSettings}
           />
