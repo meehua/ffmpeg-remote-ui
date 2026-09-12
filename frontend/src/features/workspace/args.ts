@@ -8,8 +8,8 @@
  *     Subtitle/Data options 分节——因此这里没有把「只有视频和音频」写死；
  *   - 选项插在命令行的哪一段，默认值由 ffmpeg 在分节标题里的措辞决定。
  *
- * 拆分/引号规则与后端 internal/ffmpeg 完全一致：界面上看到的参数切分，
- * 就是服务器最终执行的那一份，避免「预览对了、执行错了」。
+ * 拆分/引号规则与后端 internal/ffmpeg 完全一致（两边都按平台分 POSIX 与 cmd 两套）：
+ * 界面上看到的参数切分，就是服务器最终执行的那一份，避免「预览对了、执行错了」。
  */
 
 import type { CliScope } from '../../api/types';
@@ -233,6 +233,8 @@ export interface BuildRequest {
   settings: EncodeSettings;
   /** 手写补充参数，插在输出文件之前。 */
   extraArgs: string;
+  /** 服务器所在平台：手写参数与命令预览都按它的规则处理。 */
+  platform?: Platform;
 }
 
 function appendOptions(args: string[], options: Record<string, string>): void {
@@ -257,7 +259,13 @@ function appendOptions(args: string[], options: Record<string, string>): void {
  * `-hide_banner` 不在这里生成：服务器执行前会自己补上（见 internal/server 的
  * runJob），免得界面把一个纯日志开关当成转码设置。
  */
-export function buildArgs({ input, output, settings, extraArgs }: BuildRequest): string[] {
+export function buildArgs({
+  input,
+  output,
+  settings,
+  extraArgs,
+  platform = 'posix',
+}: BuildRequest): string[] {
   const args: string[] = [];
 
   appendCli(args, settings.cli, 'global');
@@ -282,7 +290,7 @@ export function buildArgs({ input, output, settings, extraArgs }: BuildRequest):
   }
 
   appendCli(args, settings.cli, 'output');
-  args.push(...splitArgs(extraArgs));
+  args.push(...splitArgs(extraArgs, platform));
   args.push(output);
   return args;
 }
@@ -317,12 +325,31 @@ function appendCli(args: string[], cli: Record<string, CliValue>, position: CliP
 /* ---------------------------------------------------------------- 文本 */
 
 /**
- * 拆分手写命令行。
+ * 服务器所在平台——argv 的引用与拆分规则按它分两套。
+ *
+ * 这两套规则与后端 internal/ffmpeg 的 args_posix.go / args_windows.go 一一对应：
+ * 界面上的预览必须就是服务器最终执行的那一份，否则「预览对了、执行错了」。
+ * 改任何一边都要同步改另一边。
+ */
+export type Platform = 'windows' | 'posix';
+
+/** 把服务器报告的 GOOS 归一成引用规则认得的两个平台之一。 */
+export function platformOf(os: string | undefined): Platform {
+  return os !== undefined && os.toLowerCase() === 'windows' ? 'windows' : 'posix';
+}
+
+export function splitArgs(input: string, platform: Platform = 'posix'): string[] {
+  return platform === 'windows' ? splitArgsWindows(input) : splitArgsPosix(input);
+}
+
+/**
+ * 拆分手写命令行，POSIX shell 的常用子集：单引号与双引号都能引用，
+ * 反斜杠在单引号外是转义前缀。
  *
  * 前端只用它做实时预览，因此对未闭合引号保持宽容；服务器端的实现会在
  * 真正执行前给出明确错误。
  */
-export function splitArgs(input: string): string[] {
+function splitArgsPosix(input: string): string[] {
   const args: string[] = [];
   let current = '';
   let quote = '';
@@ -377,10 +404,84 @@ export function splitArgs(input: string): string[] {
   return args;
 }
 
-const NEEDS_QUOTE = /[\s\\"'$`;&|<>()*?[\]{}#!~]/;
+/**
+ * 拆分手写命令行，cmd.exe 的常用子集：只有双引号是引用符，反斜杠是路径分隔符。
+ *
+ * 两个区别都来自 Windows 的实际情况：引号外的反斜杠是普通字符（否则
+ * C:\Users\me\a.mp4 会被吃成 C:Usersmea.mp4），而单引号不是 cmd 的引用符——
+ * ffmpeg 的 filtergraph 恰恰爱用它（subtitles='x.srt'），必须原样留着。
+ *
+ * 引号内的反斜杠按 CommandLineToArgvW 的规则处理：2n 个反斜杠加一个引号是
+ * n 个反斜杠加一个引号定界符，2n+1 个则是 n 个反斜杠加一个字面引号。这条规则
+ * 与服务器端一致，也与 Windows 自己解析命令行时一致。
+ */
+function splitArgsWindows(input: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  let quoted = false;
+  let started = false;
+
+  const flush = () => {
+    if (started) {
+      args.push(current);
+      current = '';
+      started = false;
+    }
+  };
+
+  // 用码点数组而不是 for...of：引号内的反斜杠要成组处理，需要向前看。
+  const chars = Array.from(input);
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i];
+
+    if (quoted && char === '\\') {
+      let n = 0;
+      while (i + n < chars.length && chars[i + n] === '\\') {
+        n += 1;
+      }
+      if (i + n < chars.length && chars[i + n] === '"') {
+        current += '\\'.repeat(Math.floor(n / 2));
+        started = true;
+        if (n % 2 === 1) {
+          current += '"'; // 奇数个：这个引号是字面字符，引用区继续
+        } else {
+          quoted = false; // 偶数个：这个引号是引用区的结束定界符
+        }
+        i += n; // 循环自增再吃掉那个引号
+        continue;
+      }
+      // 后面不是引号：反斜杠只是普通字符，一个都不能少。
+      current += '\\'.repeat(n);
+      started = true;
+      i += n - 1;
+      continue;
+    }
+
+    if (char === '"') {
+      quoted = !quoted;
+      started = true;
+      continue;
+    }
+    if (!quoted && /\s/.test(char)) {
+      flush();
+      continue;
+    }
+    current += char;
+    started = true;
+  }
+  flush();
+  return args;
+}
 
 /** 给单个参数加引号，保证拼出来的命令可以原样粘回终端。 */
-export function quoteArg(value: string): string {
+export function quoteArg(value: string, platform: Platform = 'posix'): string {
+  return platform === 'windows' ? quoteArgWindows(value) : quoteArgPosix(value);
+}
+
+const NEEDS_QUOTE = /[\s\\"'$`;&|<>()*?[\]{}#!~]/;
+
+/** POSIX：单引号内除单引号本身外无需转义，是最不容易出错的引用方式。 */
+function quoteArgPosix(value: string): string {
   if (value === '') {
     return "''";
   }
@@ -390,13 +491,42 @@ export function quoteArg(value: string): string {
   return `'${value.split("'").join("'\\''")}'`;
 }
 
-export function joinArgs(args: string[]): string {
-  return args.map(quoteArg).join(' ');
+/**
+ * Windows：含空白或引号时用双引号包裹，引号前的反斜杠按 2n/2n+1 翻倍。
+ *
+ * 末尾的反斜杠必须翻倍，否则它会把收尾引号本身转义掉——这正是 Windows 上
+ * 「路径以反斜杠结尾」出错的由来。生成出来的写法在 cmd 与 PowerShell 里都能直接粘贴。
+ */
+function quoteArgWindows(value: string): string {
+  if (value === '') {
+    return '""';
+  }
+  if (!/[\s"]/.test(value)) {
+    return value;
+  }
+
+  let out = '"';
+  let slashes = 0;
+  for (const char of value) {
+    if (char === '\\') {
+      slashes += 1;
+      continue;
+    }
+    out += char === '"' ? '\\'.repeat(slashes * 2 + 1) : '\\'.repeat(slashes);
+    out += char;
+    slashes = 0;
+  }
+  out += '\\'.repeat(slashes * 2);
+  return `${out}"`;
 }
 
-/** 去掉用户可能连在一起粘贴过来的 ffmpeg/ffprobe 前缀。 */
+export function joinArgs(args: string[], platform: Platform = 'posix'): string {
+  return args.map((arg) => quoteArg(arg, platform)).join(' ');
+}
+
+/** 去掉用户可能连在一起粘贴过来的 ffmpeg/ffprobe 前缀（认得盘符与 .exe）。 */
 export function stripToolPrefix(args: string[]): string[] {
-  const first = args[0] ?? '';
-  const isTool = first === 'ffmpeg' || first === 'ffprobe' || /(^|\/)(ffmpeg|ffprobe)$/.test(first);
-  return isTool ? args.slice(1) : args;
+  const base = (args[0] ?? '').split(/[\\/]/).pop() ?? '';
+  const name = base.toLowerCase().replace(/\.exe$/, '');
+  return name === 'ffmpeg' || name === 'ffprobe' ? args.slice(1) : args;
 }

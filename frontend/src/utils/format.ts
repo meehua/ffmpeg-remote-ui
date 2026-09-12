@@ -39,14 +39,37 @@ export function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// 服务器的路径在 Windows 上用反斜杠，而界面里到处都在取文件名、比前缀。
+// 这些地方因此要同时认两种分隔符，否则 Windows 上 baseName 会把整条路径原样返回。
+
 /** 只取路径的最后一段，用于列表里显示文件名。 */
 export function baseName(path: string): string {
-  const parts = path.split('/').filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : path;
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const index = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return index >= 0 ? trimmed.slice(index + 1) : path;
 }
 
 /** 目录路径，与 baseName 配套。 */
 export function dirName(path: string): string {
-  const index = path.lastIndexOf('/');
-  return index > 0 ? path.slice(0, index) : '/';
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const index = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return index > 0 ? trimmed.slice(0, index) : '/';
+}
+
+/**
+ * path 在 root 之下时返回相对 root 的那一段（保留原分隔符），否则返回 null。
+ *
+ * 两种分隔符都认，理由同上：只按 `/` 判断的话，「还原原目录结构」在 Windows 上
+ * 会一声不响地退化成平铺，而且从界面上看不出哪里错了。
+ */
+export function relativeTo(path: string, root: string): string | null {
+  const base = root.replace(/[\\/]+$/, '');
+  if (base === '' || path.slice(0, base.length) !== base) {
+    return null;
+  }
+  const separator = path[base.length];
+  if (separator !== '/' && separator !== '\\') {
+    return null;
+  }
+  return path.slice(base.length + 1);
 }

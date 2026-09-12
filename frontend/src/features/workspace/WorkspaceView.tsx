@@ -27,6 +27,7 @@ import {
   hasOverwrite,
   joinArgs,
   normalizeSettings,
+  platformOf,
   splitArgs,
   stripToolPrefix,
   withOverwrite,
@@ -75,14 +76,18 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
   );
   const enqueue = useAction();
 
+  // 引用与拆分规则跟着服务器走：界面在浏览器里跑，但命令是在服务器上执行的，
+  // 所以判断依据是服务器报的 GOOS，而不是浏览器所在的系统。
+  const platform = platformOf(hardware?.os);
+
   const args = useMemo(() => {
     if (manual) {
-      return stripToolPrefix(splitArgs(manualArgs));
+      return stripToolPrefix(splitArgs(manualArgs, platform));
     }
-    return buildArgs({ input, output, settings, extraArgs });
-  }, [manual, manualArgs, input, output, settings, extraArgs]);
+    return buildArgs({ input, output, settings, extraArgs, platform });
+  }, [manual, manualArgs, input, output, settings, extraArgs, platform]);
 
-  const command = joinArgs(['ffmpeg', ...args]);
+  const command = joinArgs(['ffmpeg', ...args], platform);
   const ready = input.trim() !== '' && output.trim() !== '';
 
   // 工作区没有批处理的命名选项，所以预设里只放设置与附加参数。
@@ -102,7 +107,7 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
   };
 
   const toManual = () => {
-    setManualArgs(joinArgs(args));
+    setManualArgs(joinArgs(args, platform));
     setManual(true);
   };
 

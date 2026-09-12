@@ -8,7 +8,7 @@ import { Pane, Panes } from '../../components/Pane';
 import { useAction, useAsync } from '../../hooks/useAsync';
 import { usePersistentState } from '../../hooks/usePersistentState';
 import { useI18n } from '../../i18n/LocaleProvider';
-import { baseName } from '../../utils/format';
+import { baseName, relativeTo } from '../../utils/format';
 import { JobPanel } from '../jobs/JobPanel';
 import { PresetBar } from '../presets/PresetBar';
 import type { Recipe } from '../presets/recipe';
@@ -21,6 +21,7 @@ import {
   normalizeSettings,
   withOverwrite,
   type EncodeSettings,
+  type Platform,
 } from '../workspace/args';
 import { ExtensionPicker } from './ExtensionPicker';
 import styles from './BatchView.module.css';
@@ -29,8 +30,10 @@ interface BatchViewProps {
   snapshot: Snapshot | null;
   /** ffmpeg 自己的命令行拓扑；控件的结构跟着它走。 */
   cliHelp: CliHelp | null;
-  /** 服务器上真实存在的 DRM 设备，供「硬件设备」选择使用。 */
+  /** 服务器上真实存在的设备，供「硬件设备」选择使用。 */
   devices: GpuDevice[];
+  /** 服务器所在平台：手写参数与命令预览按它的规则处理。 */
+  platform: Platform;
   jobs: Job[];
   logs: Record<string, LogLine[]>;
 }
@@ -50,11 +53,10 @@ function stripExtension(name: string): string {
  * 此时退回平铺到输出目录，而不是猜一个结构出来。
  */
 function relativeStem(input: string, root: string): string | null {
-  const base = root.trim().replace(/\/+$/, '');
-  if (base === '' || !input.startsWith(`${base}/`)) {
+  const rel = relativeTo(input, root.trim());
+  if (rel === null) {
     return null;
   }
-  const rel = input.slice(base.length + 1);
   const name = baseName(rel);
   return rel.slice(0, rel.length - name.length) + stripExtension(name);
 }
@@ -97,7 +99,7 @@ function uniqueDirs(outputs: string[]): string[] {
 }
 
 /** 批处理：一组输入文件套用同一套参数。 */
-export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewProps) {
+export function BatchView({ snapshot, cliHelp, devices, platform, jobs, logs }: BatchViewProps) {
   const { t } = useI18n();
   // 与工作区同理：状态放进浏览器本地存档，来回切换与刷新都不会白填。
   const [inputs, setInputs] = usePersistentState('batch.inputs', '');
@@ -136,9 +138,9 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
           dir === ''
             ? ''
             : outputPathFor(input, { dir, suffix, ext, root: keepTree ? scanDir : '' });
-        return { input, output, args: buildArgs({ input, output, settings, extraArgs }) };
+        return { input, output, args: buildArgs({ input, output, settings, extraArgs, platform }) };
       });
-  }, [inputs, outDir, suffix, ext, scanDir, keepTree, settings, extraArgs]);
+  }, [inputs, outDir, suffix, ext, scanDir, keepTree, settings, extraArgs, platform]);
 
   const ready = plan.length > 0 && outDir.trim() !== '';
 
@@ -206,10 +208,7 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
   };
 
   /** 预览里只显示相对输出目录的那一段，长前缀没有信息量。 */
-  const shorten = (path: string): string => {
-    const base = outDir.trim().replace(/\/+$/, '');
-    return base !== '' && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : baseName(path);
-  };
+  const shorten = (path: string): string => relativeTo(path, outDir.trim()) ?? baseName(path);
 
   return (
     <Panes columns={2}>
@@ -344,7 +343,9 @@ export function BatchView({ snapshot, cliHelp, devices, jobs, logs }: BatchViewP
               ))}
             </ul>
           )}
-          {plan[0] ? <pre className={styles.command}>{joinArgs(['ffmpeg', ...plan[0].args])}</pre> : null}
+          {plan[0] ? (
+            <pre className={styles.command}>{joinArgs(['ffmpeg', ...plan[0].args], platform)}</pre>
+          ) : null}
         </div>
 
         {submit.error ? <ErrorNote>{submit.error}</ErrorNote> : null}
