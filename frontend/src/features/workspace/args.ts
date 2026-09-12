@@ -506,23 +506,41 @@ function appendStreamOutput(args: string[], spec: string, stream: StreamSetting)
 }
 
 /**
- * 追加一次 `-init_hw_device`，同一个类型只生成一条。
+ * 追加一次 `-init_hw_device`。
  *
- * 设备名取类型名（`qsv=qsv`）而不是文档里常见的 `hw`：输入侧与输出侧可以各选
- * 一个类型，而 ffmpeg 要求设备名唯一，两条都叫 `hw` 就会撞名。名字不参与设备
- * 的选择——`-c:v h264_qsv` 这类按类型找设备，所以叫什么名字都对得上。
+ * 设备名取类型名（`qsv=qsv`），重名时给后一条加序号（`qsv2`）：ffmpeg 要求设备名
+ * 唯一，而两侧完全可能选**同一个类型、不同的设备**——两块卡各管一边就是这样——那时
+ * 两条都会想要 `qsv` 这个名字。名字不参与选设备（`-c:v h264_qsv` 是按类型找的），
+ * 叫什么名字都对得上。
  *
- * `done` 让同一个类型在两侧同时选中时只生成一条：重复初始化同一种设备没有意义，
- * 而且同样会撞名。
+ * `names` 只管重名，**不**用来去重：两侧填的设备不同就必须各生成一条，把第二条丢掉
+ * 等于用户指定的那块卡没有生效。
  */
-function appendHardware(args: string[], hw: HwDeviceSetting, done: Set<string>): void {
+function appendHardware(args: string[], hw: HwDeviceSetting, names: Set<string>): void {
   const type = hw.type.trim();
-  if (type === '' || done.has(type)) {
+  if (type === '') {
     return;
   }
-  done.add(type);
+
+  let name = type;
+  for (let n = 2; names.has(name); n += 1) {
+    name = `${type}${n}`;
+  }
+  names.add(name);
+
   const device = hw.device.trim();
-  args.push('-init_hw_device', device === '' ? `${type}=${type}` : `${type}=${type}:${device}`);
+  args.push('-init_hw_device', device === '' ? `${type}=${name}` : `${type}=${name}:${device}`);
+}
+
+/**
+ * 两侧填的是不是同一次初始化。
+ *
+ * 判据是「类型与设备值都相同」：只把类型相同而设备不同的两块卡当成一件事，就会
+ * 把后一块卡丢掉。
+ */
+function sameHardware(a: HwDeviceSetting, b: HwDeviceSetting): boolean {
+  const type = a.type.trim();
+  return type !== '' && type === b.type.trim() && a.device.trim() === b.device.trim();
 }
 
 /**
@@ -552,10 +570,14 @@ export function buildArgs({
   appendCli(args, settings.cli, 'global');
 
   // 硬件设备的初始化是全局选项（-h full: "-init_hw_device <args> initialise
-  // hardware device"），输入侧与输出侧各一份，两侧都留空就都不生成。
-  const hardwareDone = new Set<string>();
-  appendHardware(args, settings.inputHardware, hardwareDone);
-  appendHardware(args, settings.outputHardware, hardwareDone);
+  // hardware device"），输入侧与输出侧各一条。两侧填得**一模一样**时才并成一条
+  // （那是同一次初始化，重复写没有意义）；其余情况各生成一条——两块卡各管一边时
+  // 两条都必须在。
+  const hwNames = new Set<string>();
+  appendHardware(args, settings.inputHardware, hwNames);
+  if (!sameHardware(settings.inputHardware, settings.outputHardware)) {
+    appendHardware(args, settings.outputHardware, hwNames);
+  }
 
   // 协议参数是注册在 URLContext 上的普通选项（-http_proxy、-timeout…），
   // 按它作用的方向摆在对应文件之前。

@@ -449,9 +449,22 @@ test('filter_complex 与 -map 生成的命令真的能被 FFmpeg 接受', () => 
   execFileSync('ffmpeg', real, { stdio: 'inherit' });
 });
 
-test('Case 10：输入侧与输出侧各可初始化一个硬件设备，同一类型只生成一条', () => {
-  // 两侧各一个类型：`-init_hw_device` 本来就可以出现多次，这是它正当的用法
-  // （输入用 cuda 解码、输出用 qsv 编码）。
+test('Case 10：输入侧与输出侧各初始化一个硬件设备，两块卡各生成一条', () => {
+  // 两块卡各管一边：类型相同、设备不同，两条都必须在——这里是用户真的指定了
+  // 两个设备，丢掉第二条就等于输出侧那块卡没生效。
+  const twoCards = {
+    ...args.emptySettings,
+    inputHardware: { type: 'qsv', device: '/dev/dri/renderD128' },
+    outputHardware: { type: 'qsv', device: '/dev/dri/renderD129' },
+  };
+  assert.deepEqual(build(twoCards).slice(0, 4), [
+    '-init_hw_device',
+    'qsv=qsv:/dev/dri/renderD128',
+    '-init_hw_device',
+    'qsv=qsv2:/dev/dri/renderD129',
+  ]);
+
+  // 两侧不同类型：也是各一条（输入用 cuda 解码、输出用 qsv 编码）。
   const both = {
     ...args.emptySettings,
     inputHardware: { type: 'cuda', device: '' },
@@ -464,14 +477,13 @@ test('Case 10：输入侧与输出侧各可初始化一个硬件设备，同一�
     'qsv=qsv:0',
   ]);
 
-  // 两侧选了同一个类型：只生成一条——重复初始化同一种设备没有意义，而且
-  // ffmpeg 要求设备名唯一，两条都会叫 qsv。
+  // 两侧填得一模一样：那是同一次初始化，并成一条。
   const same = {
     ...args.emptySettings,
-    inputHardware: { type: 'qsv', device: '' },
-    outputHardware: { type: 'qsv', device: '/dev/dri/renderD128' },
+    inputHardware: { type: 'qsv', device: '0' },
+    outputHardware: { type: 'qsv', device: '0' },
   };
-  assert.deepEqual(build(same).slice(0, 2), ['-init_hw_device', 'qsv=qsv']);
+  assert.deepEqual(build(same).slice(0, 2), ['-init_hw_device', 'qsv=qsv:0']);
 
   // 两侧都留空：一条也不生成，其余照旧。
   assert.deepEqual(build(args.emptySettings), ['-i', 'in.mp4', 'out.mp4']);
