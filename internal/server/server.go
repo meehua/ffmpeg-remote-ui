@@ -241,7 +241,10 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(entries) == 0 {
 			// 没有配置媒体根目录时，从文件系统根开始，方便在内网主机上直接使用。
-			entries = append(entries, FileEntry{Name: "/", Path: string(os.PathSeparator), Dir: true})
+			// Windows 没有唯一的根，那里给的是盘符列表（见 filesystemRoots）。
+			for _, root := range filesystemRoots() {
+				entries = append(entries, FileEntry{Name: root, Path: root, Dir: true})
+			}
 		}
 		write(w, filesResponse{Roots: s.mediaRoots, Entries: entries})
 		return
@@ -261,7 +264,7 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request) {
 	out := make([]FileEntry, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if isHiddenEntry(name, e) {
 			continue // 隐藏文件基本不是媒体，默认不展示
 		}
 		full := filepath.Join(dir, name)
@@ -667,7 +670,8 @@ func (s *Server) staticHandler() http.Handler {
 
 // allowedPath 判断路径是否位于允许的媒体目录内。
 //
-// 除了清理路径，还会解析符号链接，避免通过链接跳出媒体根目录。
+// 除了清理路径，还会解析符号链接，避免通过链接跳出媒体根目录；
+// 比较时按平台的规矩归一（Windows 上大小写不敏感）。
 func (s *Server) allowedPath(p string) bool {
 	if p == "" {
 		return false
@@ -679,9 +683,9 @@ func (s *Server) allowedPath(p string) bool {
 	if len(s.mediaRoots) == 0 {
 		return true
 	}
-	resolved := resolvePath(clean)
+	resolved := comparablePath(resolvePath(clean))
 	for _, root := range s.mediaRoots {
-		r := resolvePath(filepath.Clean(root))
+		r := comparablePath(resolvePath(filepath.Clean(root)))
 		if resolved == r || strings.HasPrefix(resolved, r+string(os.PathSeparator)) {
 			return true
 		}

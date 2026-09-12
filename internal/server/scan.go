@@ -106,7 +106,7 @@ func scanDir(root string, exts []string, limit int) (scanResponse, error) {
 		}
 
 		name := entry.Name()
-		if strings.HasPrefix(name, ".") {
+		if isHiddenEntry(name, entry) {
 			// 隐藏文件与隐藏目录都不是媒体，而且 .git、.cache 这类目录
 			// 一旦递归进去会又慢又吵。
 			if entry.IsDir() {
