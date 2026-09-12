@@ -99,8 +99,10 @@ export function WorkspaceView({ snapshot, cliHelp, hardware, jobs, logs }: Works
     if (manual) {
       return stripToolPrefix(splitArgs(manualArgs, platform));
     }
-    return buildArgs({ input, output, settings, extraArgs, platform });
-  }, [manual, manualArgs, input, output, settings, extraArgs, platform]);
+    // 传命令行帮助进去：输出侧那块硬件卡怎么指名（`-qsv_device` 这类专用选项）
+    // 是从 ffmpeg 自己的选项表里读出来的，不是程序写死的。
+    return buildArgs({ input, output, settings, extraArgs, platform, cliHelp });
+  }, [manual, manualArgs, input, output, settings, extraArgs, platform, cliHelp]);
 
   const command = joinArgs(['ffmpeg', ...args], platform);
   const ready = input.trim() !== '' && output.trim() !== '';

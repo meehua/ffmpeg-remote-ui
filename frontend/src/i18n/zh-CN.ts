@@ -208,7 +208,7 @@ export const zhCN = {
   'builder.hwDevice.typeMatch':
     '类型要对得上硬件：FFmpeg 报的是它支持哪些类型，不代表本机就能用。',
   'builder.hwNode': '设备节点',
-  'builder.hwNode.hint': '值的含义按类型而定，界面不替你猜；不指定＝让 FFmpeg 自己挑，实测结论会写在值旁边。',
+  'builder.hwNode.hint': '值的含义随类型而定（cuda 是设备号、vaapi 是渲染节点、vulkan 是索引或名字；QSV 的节点会写进 child_device）；不指定＝让 FFmpeg 自己挑，实测结论会写在值旁边。',
   'builder.hwNode.placeholder': '例如 0、1 或 /dev/dri/renderD128',
   'builder.hwNode.auto': '自动选择',
   'builder.hwNode.manual': '手动填写…',

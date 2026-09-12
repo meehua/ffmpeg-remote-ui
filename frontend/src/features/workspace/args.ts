@@ -17,7 +17,7 @@
  * 界面上看到的参数切分，就是服务器最终执行的那一份，避免「预览对了、执行错了」。
  */
 
-import type { CliScope } from '../../api/types';
+import type { CliHelp, CliScope } from '../../api/types';
 import { isRecord } from '../../utils/format';
 
 /* ---------------------------------------------------------------- 命令选项 */
@@ -145,7 +145,7 @@ export interface StreamSetting {
  *
  * 输入侧与输出侧各有一份：两侧可以要不同的类型（输入用 cuda 解码、输出用 qsv
  * 编码是常见组合），也都可以留空。ffmpeg 允许 `-init_hw_device` 出现多次，但
- * 设备名必须唯一，所以名字怎么取见 buildArgs 里的 appendHardware。
+ * 设备名必须唯一——名字怎么取、以及它绑到哪一侧，见 buildArgs。
  */
 export interface HwDeviceSetting {
   /** 设备类型，例如 qsv、vaapi、cuda；空串表示这一侧不初始化。 */
@@ -354,8 +354,10 @@ function normalizeFilterComplex(raw: unknown): FilterComplexSetting {
  * 收拢一处硬件设备设置。
  *
  * 按顺序取第一个是对象的来源：新结构有 `inputHardware` / `outputHardware` 两份，
- * 旧结构只有一份 `hwDevice`。旧的那份迁到**输入侧**——`-init_hw_device` 是全局
- * 选项，放哪一侧生成的命令都一样，所以这份老预设的行为一字不变。
+ * 旧结构只有一份 `hwDevice`。旧的那份迁到**输出侧**：那时的单格挂在「编码参数」
+ * 面板上，填它多半是为了用硬件编码，而输出侧正是生成 `-filter_hw_device` 的那一侧
+ * （`-init_hw_device qsv=hw -filter_hw_device hw -c:v h264_qsv` 是 ffmpeg 那边的常见
+ * 写法）。迁到输入侧会顺带打开硬件解码，那更可能改掉一份老预设本来能跑的行为。
  */
 function normalizeHardware(...sources: unknown[]): HwDeviceSetting {
   for (const source of sources) {
@@ -381,16 +383,16 @@ export function normalizeSettings(raw: unknown): EncodeSettings {
   if (!hasCli && !isRecord(record.streams)) {
     return {
       ...fromLegacy(record),
-      inputHardware: normalizeHardware(record.inputHardware, record.hwDevice),
-      outputHardware: normalizeHardware(record.outputHardware),
+      inputHardware: normalizeHardware(record.inputHardware),
+      outputHardware: normalizeHardware(record.outputHardware, record.hwDevice),
     };
   }
 
   return {
     cli: normalizeEntries(record.cli),
     streams: normalizeStreams(record.streams),
-    inputHardware: normalizeHardware(record.inputHardware, record.hwDevice),
-    outputHardware: normalizeHardware(record.outputHardware),
+    inputHardware: normalizeHardware(record.inputHardware),
+    outputHardware: normalizeHardware(record.outputHardware, record.hwDevice),
     inputFormat: normalizeFormat(record.inputFormat),
     outputFormat: normalizeFormat(record.outputFormat),
     inputProtocol: normalizeProtocol(record.inputProtocol),
@@ -432,6 +434,14 @@ export interface BuildRequest {
   extraArgs: string;
   /** 服务器所在平台：手写参数与命令预览都按它的规则处理。 */
   platform?: Platform;
+  /**
+   * ffmpeg 自己的命令行拓扑（`-h long`），用来读出「类型专用设备选项」。
+   *
+   * 输出侧那块卡怎么被指名由它决定：`<类型>_device` 这类选项（`qsv_device`、
+   * `vaapi_device`…）才是给编解码器指定设备的那个开关，而 `-filter_hw_device`
+   * 按文档只管滤镜。映射由 hardwareDeviceOptionsOf 从这份帮助里读出来。
+   */
+  cliHelp?: CliHelp | null;
 }
 
 /** 追加一组组件私有参数：`-<名> <取值>`。空值不生成半截参数。 */
@@ -505,51 +515,66 @@ function appendStreamOutput(args: string[], spec: string, stream: StreamSetting)
   }
 }
 
-/**
- * 追加一次 `-init_hw_device`。
- *
- * 设备名取类型名（`qsv=qsv`），重名时给后一条加序号（`qsv2`）：ffmpeg 要求设备名
- * 唯一，而两侧完全可能选**同一个类型、不同的设备**——两块卡各管一边就是这样——那时
- * 两条都会想要 `qsv` 这个名字。名字不参与选设备（`-c:v h264_qsv` 是按类型找的），
- * 叫什么名字都对得上。
- *
- * `names` 只管重名，**不**用来去重：两侧填的设备不同就必须各生成一条，把第二条丢掉
- * 等于用户指定的那块卡没有生效。
- */
-function appendHardware(args: string[], hw: HwDeviceSetting, names: Set<string>): void {
-  const type = hw.type.trim();
-  if (type === '') {
-    return;
-  }
-
+/** 一次设备初始化在命令行上要用的名字：类型名，重名时加序号（`qsv2`）。 */
+function hwDeviceName(type: string, names: Set<string>): string {
   let name = type;
   for (let n = 2; names.has(name); n += 1) {
     name = `${type}${n}`;
   }
   names.add(name);
-
-  const device = hw.device.trim();
-  args.push('-init_hw_device', device === '' ? `${type}=${name}` : `${type}=${name}:${device}`);
+  return name;
 }
 
 /**
- * 两侧填的是不是同一次初始化。
+ * `-init_hw_device` 的取值。
  *
- * 判据是「类型与设备值都相同」：只把类型相同而设备不同的两块卡当成一件事，就会
- * 把后一块卡丢掉。
+ * 设备节点放在参数里的哪个位置**按类型不同**，这不是本程序的规矩，是 ffmpeg 文档
+ * 写死的语法（`ffmpeg -h full` 只有一行 `<args>`，这一层只在 man/官网文档里）：
+ *
+ *   - QSV 的 `device` 位置收的是 MFX 实现（`hw`、`auto_any`、`hw2`…），DRM 节点得用
+ *     `child_device=` 传。官方原文：`-init_hw_device qsv:hw,child_device=/dev/dri/renderD129`
+ *     —— "Create a QSV device with MFX_IMPL_HARDWARE on DRM render node …"。把节点写进
+ *     device 位置（`qsv=qsv2:/dev/dri/renderD129`）不会报错，却会被当成实现选择符，
+ *     设备于是退回默认那块——两块卡都落在核显上就是这么来的。
+ *   - 其余类型的 `device` 位置本身就是设备：cuda 是序号、vaapi 是 DRM 节点路径。
  */
-function sameHardware(a: HwDeviceSetting, b: HwDeviceSetting): boolean {
-  const type = a.type.trim();
-  return type !== '' && type === b.type.trim() && a.device.trim() === b.device.trim();
+function hwDeviceArg(type: string, name: string, device: string): string {
+  if (device === '') {
+    return `${type}=${name}`;
+  }
+  return type === 'qsv' ? `${type}=${name}:hw,child_device=${device}` : `${type}=${name}:${device}`;
+}
+
+/**
+ * 从 `ffmpeg -h long` 的帮助里读出「类型专用设备选项」：类型 -> 选项名。
+ *
+ * 判据是 ffmpeg 自己的命名——`<类型>_device`（"Advanced global options" 里的
+ * `qsv_device`、`vaapi_device`…）。所以这不是本程序维护的类型清单：ffmpeg 给某个
+ * 类型加了设备选项，这里自动就有。
+ *
+ * 它决定输出侧那块卡怎么被指名。多卡时官方给的就是它（`-qsv_device <节点>`）；
+ * 而 `-filter_hw_device` 按文档只管滤镜，拿它当编码器的选卡开关是不起作用的。
+ */
+export function hardwareDeviceOptionsOf(cliHelp: CliHelp | null): Record<string, string> {
+  const options: Record<string, string> = {};
+  for (const section of cliHelp?.sections ?? []) {
+    for (const option of section.options) {
+      const match = /^([a-z0-9]+)_device$/.exec(option.name);
+      if (match) {
+        options[match[1]] = option.name;
+      }
+    }
+  }
+  return options;
 }
 
 /**
  * 按 ffmpeg 的参数分层拼装：
  *
- *   全局选项 → 硬件设备（输入侧、输出侧各一次）→ 输入协议参数 → 输入侧选项 →
- *   -f 输入格式 → 每类流的解码器 → -i 输入 → filter_complex 与 -map →
- *   每类流的编码设置（编码器 → bsf → 简单滤镜链）→ 输出侧选项 → -f 输出格式 →
- *   输出协议参数 → 手写补充参数 → 输出文件
+ *   全局选项 → 硬件设备（创建 + 输出侧绑定）→ 输入协议参数 → 输入侧选项 →
+ *   -f 输入格式 → 输入侧的硬件解码（-hwaccel）→ 每类流的解码器 → -i 输入 →
+ *   filter_complex 与 -map → 每类流的编码设置（编码器 → bsf → 简单滤镜链）→
+ *   输出侧选项 → -f 输出格式 → 输出协议参数 → 手写补充参数 → 输出文件
  *
  * 这个层次不是一份手写的顺序表，而是「选项属于 ffmpeg 的哪一段」的直接结果：
  * 全局选项必须最先；解码器与输入侧选项必须早于它作用的输入；编码器、bsf、
@@ -564,19 +589,58 @@ export function buildArgs({
   settings,
   extraArgs,
   platform = 'posix',
+  cliHelp = null,
 }: BuildRequest): string[] {
   const args: string[] = [];
 
+  // 输出侧那块卡怎么被指名，取决于这套 ffmpeg 报了哪些「类型专用设备选项」。
+  const hardwareDeviceOptions = hardwareDeviceOptionsOf(cliHelp);
+
   appendCli(args, settings.cli, 'global');
 
-  // 硬件设备的初始化是全局选项（-h full: "-init_hw_device <args> initialise
-  // hardware device"），输入侧与输出侧各一条。两侧填得**一模一样**时才并成一条
-  // （那是同一次初始化，重复写没有意义）；其余情况各生成一条——两块卡各管一边时
-  // 两条都必须在。
+  // 硬件设备：两侧各可指定一块，并且各自**指名到它该管的那一侧**。
+  //
+  // `-init_hw_device` 只负责把设备创建出来，它不记得哪块是给输入、哪块是给输出的
+  // ——同类型有多个时 ffmpeg 自己挑一个，所以「输入用哪块、输出用哪块」必须在命令行
+  // 上另说一句。两句都取自 ffmpeg 自己的选项，而且**只有这两句管用**：
+  //
+  //   - 输入侧那块用于解码：`-hwaccel <类型> -hwaccel_device <名>`。两个都是
+  //     input-only 的选项，所以落在下面输入段（-i 之前）。
+  //   - 输出侧那块用于编码：该类型的专用设备选项，例如 QSV 的 `-qsv_device <节点>`。
+  //     别拿 `-filter_hw_device` 当这个开关用：ffmpeg 文档说它「把命名的设备交给所有
+  //     滤镜」（"Pass the hardware device called name to all filters in any filter
+  //     graph… a global setting, so all filters will receive the same device"），
+  //     对编码器选哪块卡不起作用。ffmpeg 没报这种专用选项时才退回它。
+  //
+  // 设备名取类型名（`qsv=qsv`），重名时给后一条加序号（`qsv2`）：ffmpeg 要求设备名
+  // 唯一，而两侧完全可能选同一个类型、不同的设备——两块卡各管一边就是这样。
   const hwNames = new Set<string>();
-  appendHardware(args, settings.inputHardware, hwNames);
-  if (!sameHardware(settings.inputHardware, settings.outputHardware)) {
-    appendHardware(args, settings.outputHardware, hwNames);
+  const inputHwType = settings.inputHardware.type.trim();
+  const inputHwDevice = settings.inputHardware.device.trim();
+  const outputHwType = settings.outputHardware.type.trim();
+  const outputHwDevice = settings.outputHardware.device.trim();
+  const outputHwOption = hardwareDeviceOptions[outputHwType];
+
+  let inputHwName = '';
+  if (inputHwType !== '') {
+    inputHwName = hwDeviceName(inputHwType, hwNames);
+    args.push('-init_hw_device', hwDeviceArg(inputHwType, inputHwName, inputHwDevice));
+  }
+
+  if (outputHwType !== '') {
+    const sameInitialisation =
+      inputHwType !== '' && inputHwType === outputHwType && inputHwDevice === outputHwDevice;
+
+    if (outputHwOption !== undefined && outputHwDevice !== '') {
+      // 这个类型有专门的设备选项，直接指名——多卡时 ffmpeg 官方给的就是它。
+      args.push(`-${outputHwOption}`, outputHwDevice);
+    } else {
+      const name = sameInitialisation ? inputHwName : hwDeviceName(outputHwType, hwNames);
+      if (!sameInitialisation) {
+        args.push('-init_hw_device', hwDeviceArg(outputHwType, name, outputHwDevice));
+      }
+      args.push('-filter_hw_device', name);
+    }
   }
 
   // 协议参数是注册在 URLContext 上的普通选项（-http_proxy、-timeout…），
@@ -587,6 +651,12 @@ export function buildArgs({
     args.push('-f', settings.inputFormat.name);
   }
   appendOptionValues(args, settings.inputFormat.options);
+
+  // 输入侧那块设备用于解码。放在这里是因为 -hwaccel 与 -hwaccel_device 都是
+  // input-only 的选项：它们必须落在所作用的那个输入之前。
+  if (inputHwName !== '') {
+    args.push('-hwaccel', inputHwType, '-hwaccel_device', inputHwName);
+  }
 
   // 解码器必须早于 -i：它作用于这个输入的码流。没指定时整段不生成，
   // 由 ffmpeg 自己选解码器。

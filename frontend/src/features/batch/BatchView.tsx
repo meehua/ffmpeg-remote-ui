@@ -95,9 +95,13 @@ export function BatchView({ snapshot, cliHelp, hardware, jobs, logs }: BatchView
           dir === ''
             ? ''
             : outputPathFor(input, { dir, suffix, ext, root: keepTree ? scanDir : '' });
-        return { input, output, args: buildArgs({ input, output, settings, extraArgs, platform }) };
+        return {
+          input,
+          output,
+          args: buildArgs({ input, output, settings, extraArgs, platform, cliHelp }),
+        };
       });
-  }, [inputs, outDir, suffix, ext, scanDir, keepTree, settings, extraArgs, platform]);
+  }, [inputs, outDir, suffix, ext, scanDir, keepTree, settings, extraArgs, platform, cliHelp]);
 
   const ready = plan.length > 0 && outDir.trim() !== '';
 

@@ -76,8 +76,26 @@ function settingsOf(streams, cli = []) {
   return { ...args.emptySettings, cli, streams };
 }
 
-function build(settings, extraArgs = '') {
-  return args.buildArgs({ input: 'in.mp4', output: 'out.mp4', settings, extraArgs });
+/**
+ * 一份最小的 `-h long` 帮助，只放这次要用的选项。
+ *
+ * 真机上是三百多个选项，但 buildArgs 只从里面读 `<类型>_device` 这一种名字——
+ * 也就是「给这个类型的编解码器指定设备」的那个开关（见 hardwareDeviceOptionsOf）。
+ */
+const cliHelpWithQsvDevice = {
+  level: 'long',
+  raw: '',
+  sections: [
+    {
+      name: 'Advanced global options',
+      scope: 'global',
+      options: [{ name: 'vaapi_device' }, { name: 'qsv_device' }],
+    },
+  ],
+};
+
+function build(settings, extraArgs = '', cliHelp = null) {
+  return args.buildArgs({ input: 'in.mp4', output: 'out.mp4', settings, extraArgs, cliHelp });
 }
 
 test('Case 1：编码器私有参数 → -c:v libx264 -crf 21', () => {
@@ -449,47 +467,72 @@ test('filter_complex 与 -map 生成的命令真的能被 FFmpeg 接受', () => 
   execFileSync('ffmpeg', real, { stdio: 'inherit' });
 });
 
-test('Case 10：输入侧与输出侧各初始化一个硬件设备，两块卡各生成一条', () => {
-  // 两块卡各管一边：类型相同、设备不同，两条都必须在——这里是用户真的指定了
-  // 两个设备，丢掉第二条就等于输出侧那块卡没生效。
+test('Case 10：输入/输出各指定一块卡，并各自指名到它该管的那一侧', () => {
+  // 两块卡各管一边：类型相同、设备不同。
+  //   输入侧 —— 创建命名设备。QSV 的 DRM 节点要用 child_device= 传（官方文档：
+  //             `-init_hw_device qsv:hw,child_device=/dev/dri/renderD129`）；写进
+  //             device 位置不会报错，却会被当成 MFX 实现选择符，设备退回默认那块。
+  //   输出侧 —— 用这个类型的专用设备选项 `-qsv_device`。文档里 `-filter_hw_device`
+  //             只管滤镜，拿它选「编码器用哪块卡」是不起作用的。
   const twoCards = {
     ...args.emptySettings,
     inputHardware: { type: 'qsv', device: '/dev/dri/renderD128' },
     outputHardware: { type: 'qsv', device: '/dev/dri/renderD129' },
   };
-  assert.deepEqual(build(twoCards).slice(0, 4), [
+  assert.deepEqual(build(twoCards, '', cliHelpWithQsvDevice), [
     '-init_hw_device',
-    'qsv=qsv:/dev/dri/renderD128',
-    '-init_hw_device',
-    'qsv=qsv2:/dev/dri/renderD129',
+    'qsv=qsv:hw,child_device=/dev/dri/renderD128',
+    '-qsv_device',
+    '/dev/dri/renderD129',
+    // 输入侧那块用于解码；两条都是 input-only 的选项，所以落在 -i 之前。
+    '-hwaccel',
+    'qsv',
+    '-hwaccel_device',
+    'qsv',
+    '-i',
+    'in.mp4',
+    'out.mp4',
   ]);
 
-  // 两侧不同类型：也是各一条（输入用 cuda 解码、输出用 qsv 编码）。
-  const both = {
-    ...args.emptySettings,
-    inputHardware: { type: 'cuda', device: '' },
-    outputHardware: { type: 'qsv', device: '0' },
-  };
-  assert.deepEqual(build(both).slice(0, 4), [
+  // 这套 ffmpeg 没报类型专用选项时：退回 init + filter_hw_device（它只管滤镜，
+  // 但至少把设备交出去了）。
+  assert.deepEqual(build(twoCards).slice(0, 8), [
     '-init_hw_device',
-    'cuda=cuda',
+    'qsv=qsv:hw,child_device=/dev/dri/renderD128',
     '-init_hw_device',
-    'qsv=qsv:0',
+    'qsv=qsv2:hw,child_device=/dev/dri/renderD129',
+    '-filter_hw_device',
+    'qsv2',
+    '-hwaccel',
+    'qsv',
   ]);
 
-  // 两侧填得一模一样：那是同一次初始化，并成一条。
-  const same = {
-    ...args.emptySettings,
-    inputHardware: { type: 'qsv', device: '0' },
-    outputHardware: { type: 'qsv', device: '0' },
-  };
-  assert.deepEqual(build(same).slice(0, 2), ['-init_hw_device', 'qsv=qsv:0']);
+  // 非 QSV 类型：节点落在 device 位置（cuda 认的是序号）。
+  const cudaOut = { ...args.emptySettings, outputHardware: { type: 'cuda', device: '0' } };
+  assert.deepEqual(build(cudaOut, '', cliHelpWithQsvDevice), [
+    '-init_hw_device',
+    'cuda=cuda:0',
+    '-filter_hw_device',
+    'cuda',
+    '-i',
+    'in.mp4',
+    'out.mp4',
+  ]);
+
+  // 只填了类型、没填节点：没有节点就没法用专用选项指名，退回命名设备。
+  const typeOnly = { ...args.emptySettings, outputHardware: { type: 'qsv', device: '' } };
+  assert.deepEqual(build(typeOnly, '', cliHelpWithQsvDevice).slice(0, 4), [
+    '-init_hw_device',
+    'qsv=qsv',
+    '-filter_hw_device',
+    'qsv',
+  ]);
 
   // 两侧都留空：一条也不生成，其余照旧。
   assert.deepEqual(build(args.emptySettings), ['-i', 'in.mp4', 'out.mp4']);
 });
 
-test('旧预设里那一个 hwDevice 迁到输入侧，生成的命令一字不差', () => {
+test('旧预设里那一个 hwDevice 迁到输出侧', () => {
   const loaded = recipe.decodeRecipe({
     version: 2,
     settings: {
@@ -500,7 +543,13 @@ test('旧预设里那一个 hwDevice 迁到输入侧，生成的命令一字不�
     extraArgs: '',
   });
   assert.ok(loaded, '旧配方应当能读回来');
-  assert.equal(loaded.settings.inputHardware.type, 'qsv');
-  assert.equal(loaded.settings.outputHardware.type, '');
-  assert.deepEqual(build(loaded.settings).slice(0, 2), ['-init_hw_device', 'qsv=qsv:0']);
+  assert.equal(loaded.settings.inputHardware.type, '');
+  assert.equal(loaded.settings.outputHardware.type, 'qsv');
+  assert.deepEqual(build(loaded.settings, '', cliHelpWithQsvDevice), [
+    '-qsv_device',
+    '0',
+    '-i',
+    'in.mp4',
+    'out.mp4',
+  ]);
 });

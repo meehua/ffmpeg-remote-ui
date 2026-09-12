@@ -203,7 +203,7 @@ export const enUS: Record<keyof typeof zhCN, Message> = {
   'builder.hwDevice.typeMatch':
     'The type has to match the hardware: what FFmpeg reports is which types it supports, not which of them this machine can use.',
   'builder.hwNode': 'Device node',
-  'builder.hwNode.hint': 'What this value means depends on the type; the app will not guess it for you. "Choose automatically" leaves it to FFmpeg, and a tested value carries FFmpeg\'s own answer.',
+  'builder.hwNode.hint': 'What this value means depends on the type (cuda takes a device number, vaapi a render node, vulkan an index or a name; for QSV the node goes into child_device). "Choose automatically" leaves it to FFmpeg, and a tested value carries FFmpeg\'s own answer.',
   'builder.hwNode.placeholder': 'e.g. 0, 1 or /dev/dri/renderD128',
   'builder.hwNode.auto': 'Choose automatically',
   'builder.hwNode.manual': 'Fill in manually…',
