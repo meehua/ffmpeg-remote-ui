@@ -156,6 +156,18 @@ function mergeItems(...groups: FFItem[][]): FFItem[] {
 }
 
 /**
+ * 取出 `-devices` 里支持某一侧的设备。
+ *
+ * flags 列写着这个设备支持哪一侧（`D` = demux、`E` = mux），与 ffmpeg 对 demuxer /
+ * muxer 的写法是同一套。FFmpeg 把设备实现成 demuxer 或 muxer，所以设备要并进对应
+ * 那一侧的 `-f` 候选里：alsa、fbdev、xvfb 这些**可以作为输出设备**，只把 `-devices`
+ * 整份并进输入侧，输出侧就一个设备都选不到。
+ */
+function devicesFor(items: FFItem[], side: 'D' | 'E'): FFItem[] {
+  return items.filter((item) => item.flags?.includes(side));
+}
+
+/**
  * 把一段滤镜片段接到链尾。链非空时用 ffmpeg 的 ',' 分隔（多个滤镜就是一条链）。
  */
 function appendFilter(chain: string, snippet: string): string {
@@ -265,13 +277,14 @@ export function CommandBuilder({
         />
       ))}
 
-      {/* 输入侧的格式：`-f <demuxer>`。设备也在这一列——FFmpeg 把 v4l2、alsa
-          这类设备实现成 demuxer/muxer，所以它们的参数就是 `-h demuxer=<名>`。 */}
+      {/* 输入侧的格式：`-f <demuxer>`。设备也在这一列——FFmpeg 把 v4l2、alsa 这类
+          设备实现成 demuxer/muxer，所以设备按 `-devices` 的 flags 分到各自的侧面：
+          两个方向都能选到设备，只支持 mux 的那些不会跑到输入侧来。 */}
       <FormatSection
         title={t('builder.format.input.title')}
         hint={t('builder.format.input.hint')}
         target="demuxer"
-        candidates={mergeItems(snapshot.demuxers, snapshot.devices)}
+        candidates={mergeItems(snapshot.demuxers, devicesFor(snapshot.devices, 'D'))}
         setting={settings.inputFormat}
         onChange={(inputFormat) => onChange({ ...settings, inputFormat })}
       />
@@ -280,7 +293,7 @@ export function CommandBuilder({
         title={t('builder.format.output.title')}
         hint={t('builder.format.output.hint')}
         target="muxer"
-        candidates={snapshot.muxers}
+        candidates={mergeItems(snapshot.muxers, devicesFor(snapshot.devices, 'E'))}
         setting={settings.outputFormat}
         onChange={(outputFormat) => onChange({ ...settings, outputFormat })}
       />
