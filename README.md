@@ -2,6 +2,10 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+<p align="center">
+  <img src="./assets/screenshot.jpg" alt="screenshot" width="800">
+</p>
+
 A web FFmpeg console for Linux and Windows servers, and NAS boxes.
 
 "remote" is meant literally: the browser is only the remote control. Media files,
